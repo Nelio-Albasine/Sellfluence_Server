@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+
+    <style>
+        body{
+            background-color: #007bff;
+        }
+    </style>
+</head>
+
+<body>
+    <script>
+        const influencerAccessToken = 'EAAGP2QPR9ZAEBOZBW7YfBgBawr2RjLX9GwZAGfb5yZCBAfoF6EpAynajdurB6rguFR9sRF35zL6RhFseBzHWUCiUuKz5iEPockeZAenrwSg8XGsf6eAh0MremcE20rQU47HwzG5klMWz9zx7C8bCxWGpLOchWOM8rurv2GZBWWKULZCP6qjXNlwXdsCWph9D2Ky46cqRGZBmFAhTtBU85IVxyZAZCZC8AZDZD'
+        const influencerUserID = '241221142146712'
+
+
+        /*   curl -X GET \ 'https://graph.facebook.com/v19.0/241221142146712/insights?metric=impressions,reach,profile_views&period=day&access_token=EAAGP2QPR9ZAEBOZBW7YfBgBawr2RjLX9GwZAGfb5yZCBAfoF6EpAynajdurB6rguFR9sRF35zL6RhFseBzHWUCiUuKz5iEPockeZAenrwSg8XGsf6eAh0MremcE20rQU47HwzG5klMWz9zx7C8bCxWGpLOchWOM8rurv2GZBWWKULZCP6qjXNlwXdsCWph9D2Ky46cqRGZBmFAhTtBU85IVxyZAZCZC8AZDZD'
+       curl -k -X GET "https://graph.facebook.com/v19.0/117121664814191/insights?metric=impressions,reach,profile_views&period=day&access_token=EAAGP2QPR9ZAEBOZBW7YfBgBawr2RjLX9GwZAGfb5yZCBAfoF6EpAynajdurB6rguFR9sRF35zL6RhFseBzHWUCiUuKz5iEPockeZAenrwSg8XGsf6eAh0MremcE20rQU47HwzG5klMWz9zx7C8bCxWGpLOchWOM8rurv2GZBWWKULZCP6qjXNlwXdsCWph9D2Ky46cqRGZBmFAhTtBU85IVxyZAZCZC8AZDZD"
+
+   fetch(`https://graph.instagram.com/241221142146712/insights?metric=audience_gender_age,audience_locale&access_token=EAAGP2QPR9ZAEBOZBW7YfBgBawr2RjLX9GwZAGfb5yZCBAfoF6EpAynajdurB6rguFR9sRF35zL6RhFseBzHWUCiUuKz5iEPockeZAenrwSg8XGsf6eAh0MremcE20rQU47HwzG5klMWz9zx7C8bCxWGpLOchWOM8rurv2GZBWWKULZCP6qjXNlwXdsCWph9D2Ky46cqRGZBmFAhTtBU85IVxyZAZCZC8AZDZD`)
+           .then(response => response.text())
+           .then(data => console.log(data));
+*/
+
+        const metrics = 'impressions,reach,profile_views';
+        fetch(`https://graph.facebook.com/v19.0/117121664814191/insights?metric=${metrics}&access_token=EAAGP2QPR9ZAEBO7q6oHY349YMT6nfbP1l8WrgKx545SIBlcsZBtR6spVx0XU7U7TuLk54tfp9enZBkIYcMnpuQZAkQSJxqcHxEBP8pVwQJ9tYi0TUTjdaSQSECFOfFtzTLPPt4wnguWTYPZA1MnaZBI7ZA2XlLnyVRTgY39oo7jqQOdmtU5GrCcSlXFnSHsVZCOZB6E5WpgUZBS6nfQlQZD`)
+            .then(response => response.json())
+            .then(data => console.log(data))
+            .catch(error => console.error('Error:', error));
+
+
+
+    </script>
+</body>
+
+</html>

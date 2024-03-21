@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Insights: impressions,reach,profile_views</title>
+</head>
+
+<body>
+  <pre id="jsonDisplay"></pre>
+
+  <script>
+    const metric = 'impressions,reach,profile_views';
+    const period = 'day';
+    const accessToken = 'EAAGP2QPR9ZAEBO4eygKHRCqgtYvC9fljvgs5gANEBCuF3csCeyZAIKE7L6JLzG0ZCKpBi5sp23bMKBh9ZCiE1UmVYv0iViMDLGib2JSeZAnQa9uJSccyWFb9IkPwb87e7sbLWXnZBuYFiXmb6YO5v8sAZAXcpof9j6efOt4hPSAuWnbcJiXt81wRgNVxi5fF99wFXbxN83i';
+
+    const url = `https://graph.facebook.com/v19.0/17841460733194402/insights?metric=${metric}&period=${period}&access_token=${accessToken}`;
+
+    fetch(url)
+      .then(response => response.json())
+      .then(insights => {
+        console.log('insight data data response: ', insights);
+        document.getElementById('jsonDisplay').textContent = JSON.stringify(insights, null, 2);
+      })
+      .catch(error => console.error('Error:', error)); 
+  </script>
+</body>
+
+</html>
