@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lista de Chats</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .chat-list {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+        .chat {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        .chat:last-child {
+            border-bottom: none;
+        }
+        .profile-pic {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 15px;
+        }
+        .chat-info {
+            flex-grow: 1;
+        }
+        .chat-info h3 {
+            margin: 0;
+            font-size: 18px;
+        }
+        .chat-info p {
+            margin: 5px 0 0;
+            color: #555;
+        }
+        .timestamp {
+            color: #999;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="chat-list" id="chat-list">
+        <!-- Os chats serão inseridos aqui dinamicamente -->
+    </div>
+
+    <script>
+        // Array com os nomes dos meses em português
+        const meses = [
+            "janeiro", "fevereiro", "março", "abril", "maio", "junho", 
+            "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
+        ];
+
+        // Função para formatar a data no estilo: 9 de julho de 2024 às 15:32:45
+        function formatTimestamp(updatedAt) {
+            const updatedDate = new Date(updatedAt);
+
+            const dia = updatedDate.getDate();
+            const mes = meses[updatedDate.getMonth()];
+            const ano = updatedDate.getFullYear();
+            const hora = updatedDate.getHours().toString().padStart(2, '0');
+            const minutos = updatedDate.getMinutes().toString().padStart(2, '0');
+            const segundos = updatedDate.getSeconds().toString().padStart(2, '0');
+
+            return `${dia} de ${mes} de ${ano} às ${hora}:${minutos}:${segundos}`;
+        }
+
+        // Função para buscar mensagens e exibi-las ordenadas pelo campo updatedAt
+        async function fetchMessages() {
+            try {
+                let participant = "eo8b6sUgFOg8RtYumbc2DTi21lE3";
+                const response = await fetch(`http://localhost/Selfluence/fetch/GetAllChats.php?participant=${participant}`);
+                const messagesText = await response.text();
+
+                console.log("Raw messages: ", messagesText);
+
+                // Parseia os dados como uma lista de chats diretamente
+                const chats = JSON.parse(messagesText);
+
+                // Ordena os chats pelo campo updatedAt (mais recente primeiro)
+                chats.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+                // Função auxiliar para criar um elemento de chat
+                function createChatElement(chat) {
+                    const chatElement = document.createElement('div');
+                    chatElement.classList.add('chat');
+
+                    // Adiciona a imagem de perfil (estática por enquanto, pode ajustar com uma real)
+                    const profilePic = document.createElement('img');
+                    profilePic.classList.add('profile-pic');
+                    profilePic.src = 'profile_placeholder.jpg'; // Ajuste aqui para pegar imagens reais
+                    profilePic.alt = 'Foto de perfil';
+
+                    // Adiciona a informação do chat (nome do participante e a última mensagem)
+                    const chatInfo = document.createElement('div');
+                    chatInfo.classList.add('chat-info');
+                    const h3 = document.createElement('h3');
+                    h3.textContent = chat.otherParticipant
+                    const p = document.createElement('p');
+                    p.textContent = `Última atualização: ${formatTimestamp(chat.updatedAt)}`; // Exibe o timestamp formatado
+
+                    chatInfo.appendChild(h3);
+                    chatInfo.appendChild(p);
+
+                    // Adiciona o timestamp
+                    const timestamp = document.createElement('span');
+                    timestamp.classList.add('timestamp');
+                    timestamp.textContent = formatTimestamp(chat.updatedAt);
+
+                    // Monta o elemento final
+                    chatElement.appendChild(profilePic);
+                    chatElement.appendChild(chatInfo);
+                    chatElement.appendChild(timestamp);
+
+                    return chatElement;
+                }
+
+                // Seleciona a lista de chats e insere os chats dinamicamente
+                const chatList = document.getElementById('chat-list');
+                chatList.innerHTML = ''; // Limpa qualquer conteúdo anterior
+
+                chats.forEach(chat => {
+                    const chatElement = createChatElement(chat);
+                    chatList.appendChild(chatElement);
+                });
+
+            } catch (error) {
+                console.error('Erro ao buscar mensagens:', error);
+            }
+        }
+
+        // Chama a função ao carregar a página
+        fetchMessages();
+    </script>
+
+</body>
+</html>

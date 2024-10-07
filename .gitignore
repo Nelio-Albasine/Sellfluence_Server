@@ -1,0 +1,19 @@
+# Ignorar diretórios de dependências
+node_modules/
+
+# Ignorar arquivos sensíveis de API
+firebase_settings.json
+
+# Ignorar arquivos de log
+*.log
+
+# Ignorar diretórios temporários do sistema operacional
+.DS_Store  # Para macOS
+Thumbs.db  # Para Windows
+
+# Ignorar arquivos de compilação
+/build/
+/dist/
+
+# Ignorar arquivos de configuração de ambiente local
+.env

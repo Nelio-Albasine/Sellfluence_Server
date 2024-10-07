@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Simulado</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f0f5;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 450px;
+            margin: 30px auto;
+            background-color: #fff;
+            border-radius: 15px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 600px;
+        }
+
+        .chat-header {
+            background-color: #6200ea;
+            color: white;
+            padding: 20px;
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            border-top-left-radius: 15px;
+            border-top-right-radius: 15px;
+        }
+
+        .chat-body {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background-color: #f9f9fc;
+        }
+
+        .message {
+            margin-bottom: 20px;
+        }
+
+        .message.sent {
+            text-align: right;
+        }
+
+        .message.sent .message-content {
+            background-color: #6200ea;
+            color: white;
+        }
+
+        .message.received {
+            text-align: left;
+        }
+
+        .message.received .message-content {
+            background-color: #e0e0e0;
+            color: #333;
+        }
+
+        .message-content {
+            display: inline-block;
+            padding: 10px 15px;
+            border-radius: 20px;
+            max-width: 70%;
+            word-wrap: break-word;
+            font-size: 16px;
+        }
+
+        .chat-footer {
+            display: flex;
+            padding: 15px;
+            background-color: #fff;
+            border-top: 1px solid #ddd;
+        }
+
+        .chat-footer input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            outline: none;
+            font-size: 16px;
+        }
+
+        .chat-footer button {
+            background-color: #6200ea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin-left: 10px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .chat-footer button:hover {
+            background-color: #4b00c1;
+        }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header">
+        Chat Simulado
+    </div>
+
+    <div class="chat-body" id="chat-body">
+        <!-- As mensagens serão exibidas aqui -->
+    </div>
+
+    <div class="chat-footer">
+        <input type="text" placeholder="Digite sua mensagem...">
+        <button>Enviar</button>
+    </div>
+</div>
+
+<script>
+    const chatId = 814395;
+    const chatBody = document.getElementById('chat-body');
+
+    const inputField = document.querySelector('.chat-footer input');
+    const sendButton = document.querySelector('.chat-footer button');
+
+
+    async function fetchMessages() {
+        try {
+            const response = await fetch(`http://localhost/Selfluence/fetch/GetAllMessages.php?chatId=814395`);
+            const messagesText = await response.text();
+
+            console.log("Raw messages: ", messagesText);
+
+            const data = JSON.parse(messagesText);
+
+            data.messages.forEach(message => {
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('message', message.isSent ? 'sent' : 'received');
+
+                const messageContent = document.createElement('div');
+                messageContent.classList.add('message-content');
+                messageContent.textContent = message.text;
+
+                messageDiv.appendChild(messageContent);
+                chatBody.appendChild(messageDiv);
+            });
+        } catch (error) {
+            console.error('Erro ao buscar mensagens:', error);
+        }
+    }
+
+    // Função para gerar um ID aleatório de mensagem (equivalente ao Kotlin)
+    function generateMessageId(length = 6) {
+        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        return Array.from({ length }, () => characters.charAt(Math.floor(Math.random() * characters.length))).join('');
+    }
+
+    // Função para inserir uma nova mensagem
+    async function insertMessage() {
+        const text = inputField.value;
+        if (!text.trim()) return; // Verifica se o campo não está vazio
+
+        const messageId = generateMessageId();
+        const messageData = {
+            chatId,
+            messageId,
+            text,
+            isSent: false
+        };
+
+        try {
+            const response = await fetch('http://localhost/Selfluence/fetch/InsertMessage.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams(messageData)
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Adiciona a mensagem ao chat se inserido com sucesso
+                addMessageToChat(messageData);
+            } else {
+                console.error('Erro ao inserir mensagem:', result.message);
+            }
+        } catch (error) {
+            console.error('Erro na requisição:', error);
+        }
+    }
+
+    // Função para adicionar a nova mensagem ao chat
+    function addMessageToChat(message) {
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message', message.isSent ? 'sent' : 'received');
+
+        const messageContent = document.createElement('div');
+        messageContent.classList.add('message-content');
+        messageContent.textContent = message.text;
+
+        messageDiv.appendChild(messageContent);
+        chatBody.appendChild(messageDiv);
+
+        inputField.value = ''; // Limpa o campo de entrada
+    }
+
+    sendButton.addEventListener('click', insertMessage);
+
+    // Também pode enviar a mensagem pressionando Enter
+    inputField.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') insertMessage();
+    });
+
+    fetchMessages(); // Carrega as mensagens ao iniciar
+
+</script>
+
+</body>
+</html>
