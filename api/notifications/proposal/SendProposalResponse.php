@@ -4,7 +4,6 @@ ini_set('display_errors', 1);
 ini_set('error_log',  __DIR__ . '/sendProposalResponseErrors.log');
 header('Content-Type: application/json; charset=utf-8');
 
-//require_once __DIR__ . '../../../vendor/autoload.php';
 require '/home/parceria/sellfluence.com.br/vendor/autoload.php';
 
 use GuzzleHttp\Client;
@@ -31,6 +30,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $to = $data["to"];
         $chatId = $data["chatId"];
         $messageId = $data["messageId"];
+        $senderId = $data["senderId"];
         $companyNotificationToken = $data["companyNotificationToken"];
 
         $proposalResponseJson = json_decode($data["proposalResponse"], true);
@@ -56,7 +56,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             "proposalId" => $messageId,
             "proposalTotalPrice" => $data["proposalTotalPrice"],
             "date" => $formattedDate,
-            "chatId" => $chatId
+            "chatId" => $chatId,
+            "senderId" => $senderId,
         ];
 
         $finalResponse = false;
@@ -83,11 +84,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $info,
                 $proposalResponseJson["Reason"],
             );
+            echo json_encode(["success" => $finalResponse]);
         }
-
-        echo json_encode(["success" => $finalResponse]);
     } catch (\Throwable $th) {
-        error_log("Erro ao enviar o email: " . $th->getMessage());
+        error_log("Erro catch geral: " . $th->getMessage());
     }
 } else {
     error_log("The request method is not POST");
@@ -753,17 +753,22 @@ function notifyCompanyDevice($info, $reason)
 {
     $to = $info["companyNotificationToken"];
     $chatId = $info["chatId"];
+    $proposalId = $info["proposalId"];
     $proposalTotalPrice = $info["proposalTotalPrice"];
+    $influencerProfilePic = $info["influencerProfilePic"];
     $companyName = $info["companyName"];
+    $influencerName = $info["influencerName"];
     $companyProfilePic = $info["companyProfilePic"];
     $proposalResponseStatus = $info["proposalResponseStatus"];
+    $senderId = $info["senderId"];
+    $date = $info["date"];
 
     $privateKeyFile = '../../../firebase_settings.json';
 
     if (!file_exists($privateKeyFile)) {
         logMessage('Arquivo privateKeyFile.json não encontrado.');
         die('Arquivo privateKeyFile.json não encontrado.');
-    }
+    } 
 
     // Carrega a chave privada do JSON
     $privateKeyData = json_decode(file_get_contents($privateKeyFile), true);
@@ -795,7 +800,12 @@ function notifyCompanyDevice($info, $reason)
     ];
 
     // URL do FCM
-    $url = "https://fcm.googleapis.com/v1/projects/{$privateKeyData['project_id']}/messages:send";
+    $url = null;
+    try {
+        $url = "https://fcm.googleapis.com/v1/projects/{$privateKeyData['project_id']}/messages:send";
+    } catch (\Throwable $th) {
+        error_log("Erro no Endpoint do fcm google api: ". $th->getMessage());
+    }
 
     // Cria o payload da mensagem
     $messagePayload = [
@@ -805,10 +815,15 @@ function notifyCompanyDevice($info, $reason)
                 "type" => "proposalResponse",
                 "proposalTotalPrice" => (string) $proposalTotalPrice,
                 "companyProfilePic" => (string) $companyProfilePic,
+                "influencerProfilePic" => (string) $influencerProfilePic,
                 "companyName" => (string) $companyName,
-                "chatId" => (int) $chatId,
-                "proposalResponseStatus" => (int) $proposalResponseStatus,
+                "influencerName" => (string) $influencerName,
+                "chatId" => (string) $chatId,
+                "proposalId" => (string) $proposalId,
+                "proposalResponseStatus" => (string) $proposalResponseStatus,
                 "reasonText" => $reason,
+                "senderId" => $senderId,
+                "date" => $date,
             ],
         ],
     ];
@@ -821,7 +836,7 @@ function notifyCompanyDevice($info, $reason)
     ]);
 
     if ($response->getStatusCode() !== 200) {
-        logMessage('Erro ao enviar a notificação: ' . $response->getReasonPhrase());
+        logMessage('Erro ao enviar a notificação: ' . $response->getBody()->getContents());
         return false;
     } else {
         logMessage('Notificação enviada com sucesso.');
