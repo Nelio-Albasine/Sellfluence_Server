@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dados avançados</title>
+
+    <style>
+        body {
+            background-color: #007bff;
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Metadata para o exemplo</h1>
+    <p id="paramValue">Carregando o parâmetro...</p>
+
+    <script>
+        function getURLParameter(name) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get(name); 
+        }
+
+        const id = getURLParameter('id');
+
+        const paramValueElement = document.getElementById('paramValue');
+        if (id) {
+            paramValueElement.textContent = `O valor do parâmetro "id" é: ${id}`;
+        } else {
+            paramValueElement.textContent = "O parâmetro 'id' não foi encontrado na URL.";
+        }
+    </script>
+
+</body>
+
+</html>
