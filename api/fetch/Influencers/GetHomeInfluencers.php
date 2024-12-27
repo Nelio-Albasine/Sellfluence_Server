@@ -8,7 +8,6 @@ header('Content-Type: application/json; charset=utf-8');
 
 $logFile = __DIR__ . '/../../logs/home/error_GetHomeInfluencers.log';
 
-error_log("dentro do script");
 
 function logRequest($logFile)
 {
@@ -33,34 +32,52 @@ $accountId = FACEBOOK_ACCOUNT_ID;
 
 if ($_SERVER['REQUEST_METHOD'] == "GET") {
     try {
+        $finalResponse = [
+            'data' => [],
+            'nextCursor' => null,
+        ];
+
+
         $cursor = isset($_GET['cursor']) && $_GET['cursor'] !== 'null' ? $_GET['cursor'] : null;
-        $query = isset($_GET['query']) && $_GET['query'] !== 'null' ? $_GET['query'] : null;
+        $query = isset($_GET['query']) &&  $_GET['query'] !== 'null' ? $_GET['query'] : null;
         $limit = 2;
         $response;
 
         require_once "../../conn/Wamp64Connection.php";
         $conn = getMySQLConnection("userAccType");
 
-        if ($query != null) {
-            $response = getAllInfluencersInstaGramuserNamesAndIdsByQuery($query, $cursor, $limit);
+        if ($query !== null) {
+            $search = [
+                "isSearchingFromSearchiew" => true,
+                "searchQuery" => $query
+            ];
+            $response = getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor, $limit);
         } else {
             $response = getAllInfluencersInstaGramuserNamesAndIds($conn, $cursor, $limit);
         }
 
+        if (empty($response)) {
+            error_log("Influencers home:" . print_r($finalResponse, true));
+
+            echo json_encode($finalResponse);
+            if ($conn) {
+                $conn->close();
+            }
+            exit;
+        }
 
         $graphInfluencerUserNames = $response["graphInfluencerUserName"];
         $graphInfluencerIds = $response["graphInfluencerId"];
         $hasMoreItems = $response["hasMoreItems"];
 
         $additionalInfo = getInfluencersInfoBatch($graphInfluencerIds);
-        error_log("Additional Info:" . print_r($additionalInfo, true));
 
         $parsedData = [];
         $curlMulti = [];
         $mh = curl_multi_init();
 
         foreach ($graphInfluencerUserNames as $index => $influencerAtual) {
-            $endpoint = "https://graph.facebook.com/v18.0/$accountId?fields=business_discovery.username($influencerAtual){username,website,name,ig_id,id,profile_picture_url,biography,follows_count,followers_count,media_count,media{caption,like_count,comments_count,media_url,permalink,media_type}}&access_token=$token";
+            $endpoint = "https://graph.facebook.com/v18.0/$accountId?fields=business_discovery.username($influencerAtual){username,website,name,ig_id,id,profile_picture_url,biography,follows_count,followers_count}&access_token=$token";
             // $endpoint = "https://graph.facebook.com/v18.0/17841460733194402?fields=business_discovery.username(albasinenelio){username,website,name,ig_id,id,profile_picture_url,biography,follows_count,followers_count,media_count,media{caption,like_count,comments_count,media_url,permalink,media_type}}&access_token=$token";
 
             $ch = curl_init();
@@ -125,7 +142,10 @@ if ($_SERVER['REQUEST_METHOD'] == "GET") {
         curl_multi_close($mh);
 
         // Define o próximo cursor com base na presença de mais itens
-        $nextCursor = $hasMoreItems ? end($graphInfluencerIds) : null;
+        $nextCursor = null;
+        if (!empty($response)) {
+            $nextCursor = $hasMoreItems ? end($graphInfluencerIds) : null;
+        }
 
         $finalResponse = [
             'data' => $parsedData,
@@ -167,31 +187,20 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = nul
     $connToAccType = getMySQLConnection("userAccType");
 
     $isSearchingFromSearchView = $search["isSearchingFromSearchiew"];
-    $searchQuery = $search["searchQuery"];
+    $searchQuery = trim(strtolower($search["searchQuery"] ?? ""));
+
 
     $filteredIds = [];
 
     if ($isSearchingFromSearchView) {
         // Construindo a consulta para `Usuarios`
         $queryUsuarios = "
-            SELECT graphInfluencerId
-            FROM Usuarios
-            WHERE (
-                userMutableName LIKE CONCAT('%', ?, '%') 
-                OR userBiography LIKE CONCAT('%', ?, '%')
-            )
-        ";
-
-        // Verificar tags configuradas
-        $queryUsuarios .= "
-            AND (
-                JSON_EXTRACT(userTags, '$.isSetuped') = true 
-                AND (
-                    JSON_EXTRACT(userTags, '$.firstTag') LIKE CONCAT('%', ?, '%') 
-                    OR JSON_EXTRACT(userTags, '$.secondTag') LIKE CONCAT('%', ?, '%') 
-                    OR JSON_EXTRACT(userTags, '$.thirdTag') LIKE CONCAT('%', ?, '%')
-                )
-            )
+        SELECT graphInfluencerId
+        FROM UserProfile
+        WHERE (
+            LOWER(userMutableName) LIKE CONCAT('%', LOWER(?), '%') 
+            OR LOWER(userBiography) LIKE CONCAT('%', LOWER(?), '%')
+        )
         ";
 
         if ($cursor) {
@@ -201,17 +210,21 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = nul
         $queryUsuarios .= "ORDER BY graphInfluencerId ASC LIMIT ?";
 
         $stmtUsuarios = $connToUsuarios->prepare($queryUsuarios);
+
         if ($cursor) {
-            $stmtUsuarios->bind_param("sssssi", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $cursor, $limit);
+            $stmtUsuarios->bind_param("sssi", $searchQuery, $searchQuery, $cursor, $limit);
         } else {
-            $stmtUsuarios->bind_param("sssss", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $limit);
+            $stmtUsuarios->bind_param("ssi", $searchQuery, $searchQuery, $limit);
         }
 
         if ($stmtUsuarios->execute()) {
             $resultUsuarios = $stmtUsuarios->get_result();
             while ($row = $resultUsuarios->fetch_assoc()) {
+                error_log("Fetched graphInfluencerId: " . $row['graphInfluencerId']);
                 $filteredIds[] = $row['graphInfluencerId'];
             }
+        } else {
+            error_log("Error executing query for UserProfile: " . $stmtUsuarios->error);
         }
         $stmtUsuarios->close();
     }
@@ -220,17 +233,25 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = nul
         return ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "hasMoreItems" => false];
     }
 
+    // Construir a lista de placeholders dinamicamente
+    $placeholders = implode(",", array_fill(0, count($filteredIds), "?"));
+
     // Obter os nomes de usuários do banco `userAccType`
     $queryUsernames = "
         SELECT graphInfluencerUserName, graphInfluencerId
         FROM Influencers
-        WHERE graphInfluencerId IN (" . implode(",", array_fill(0, count($filteredIds), "?")) . ")
+        WHERE graphInfluencerId IN ($placeholders)
         ORDER BY graphInfluencerId ASC LIMIT ?
     ";
 
     $stmtUsernames = $connToAccType->prepare($queryUsernames);
+
+    // Criar dinamicamente os tipos e os argumentos para o bind_param
     $types = str_repeat("s", count($filteredIds)) . "i";
-    $stmtUsernames->bind_param($types, ...$filteredIds, $limit);
+    $params = array_merge($filteredIds, [$limit]);
+
+    // Usar call_user_func_array para vincular os parâmetros dinamicamente
+    $stmtUsernames->bind_param($types, ...$params);
 
     $resultData = ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "hasMoreItems" => false];
 
@@ -240,27 +261,49 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = nul
             $resultData["graphInfluencerUserName"][] = $row['graphInfluencerUserName'];
             $resultData["graphInfluencerId"][] = $row['graphInfluencerId'];
         }
+    } else {
+        error_log("Error executing query for Influencers: " . $stmtUsernames->error);
     }
     $stmtUsernames->close();
 
     // Verificar se há mais elementos disponíveis
     $lastId = end($resultData["graphInfluencerId"]);
+
+    error_log("lastId retornado: $lastId");
+
     if ($lastId) {
         $queryCheck = "
             SELECT 1
-            FROM Influencers
-            WHERE graphInfluencerId > ?
+            FROM UserProfile
+            WHERE (
+                LOWER(userMutableName) LIKE CONCAT('%', LOWER(?), '%') 
+                OR LOWER(userBiography) LIKE CONCAT('%', LOWER(?), '%')
+            )
+            AND graphInfluencerId > ?
             LIMIT 1
         ";
-        $stmtCheck = $connToAccType->prepare($queryCheck);
-        $stmtCheck->bind_param("s", $lastId);
-        $stmtCheck->execute();
-        $stmtCheck->store_result();
-        if ($stmtCheck->num_rows > 0) {
-            $resultData["hasMoreItems"] = true;
+        $stmtCheck = $connToUsuarios->prepare($queryCheck);
+        $stmtCheck->bind_param("sss", $searchQuery, $searchQuery, $lastId);
+    
+        if ($stmtCheck->execute()) {
+            $stmtCheck->store_result();
+            if ($stmtCheck->num_rows > 0) {
+                $resultData["hasMoreItems"] = true;
+                $resultData["nextCursor"] = $lastId;
+            } else {
+                $resultData["hasMoreItems"] = false;
+                $resultData["nextCursor"] = null; 
+            }
+        } else {
+            error_log("Error executing check query: " . $stmtCheck->error);
+            $resultData["nextCursor"] = null; 
         }
         $stmtCheck->close();
+    } else {
+        $resultData["nextCursor"] = null; 
     }
+    
+
 
     $connToUsuarios->close();
     $connToAccType->close();
@@ -316,13 +359,15 @@ function getAllInfluencersInstaGramuserNamesAndIds($conn, $cursor = null, $limit
 
     $conn->close();
 
-    error_log("resultData are:" . print_r($resultData, true));
-
     return $resultData;
 }
 
 function getInfluencersInfoBatch($arrayGraphInfluencerIds)
 {
+    if (empty($arrayGraphInfluencerIds)) {
+        return [];
+    }
+
     require_once "../../conn/Wamp64Connection.php";
 
     $connUserProfile = getMySQLConnection("users");
