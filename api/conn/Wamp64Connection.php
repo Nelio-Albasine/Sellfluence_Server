@@ -2,7 +2,7 @@
 header('Access-Control-Allow-Origin: *');
 header('Content-Type: application/json; charset=utf-8');
 
-function getMySQLConnection($databaseName) {
+function getWamp64Connection($databaseName) {
     $dbHost = 'localhost';
     $dbName = $databaseName;
     $dbUser = 'root';

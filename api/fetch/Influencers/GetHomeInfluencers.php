@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] == "GET") {
         $response;
 
         require_once "../../conn/Wamp64Connection.php";
-        $conn = getMySQLConnection("userAccType");
+        $conn = getWamp64Connection("userAccType");
 
         if ($query !== null) {
             $search = [
@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] == "GET") {
 
         foreach ($graphInfluencerUserNames as $index => $influencerAtual) {
             $endpoint = "https://graph.facebook.com/v18.0/$accountId?fields=business_discovery.username($influencerAtual){username,website,name,ig_id,id,profile_picture_url,biography,follows_count,followers_count}&access_token=$token";
-            // $endpoint = "https://graph.facebook.com/v18.0/17841460733194402?fields=business_discovery.username(albasinenelio){username,website,name,ig_id,id,profile_picture_url,biography,follows_count,followers_count,media_count,media{caption,like_count,comments_count,media_url,permalink,media_type}}&access_token=$token";
+            // $endpoint = "https://graph.facebook.com/v18.0/17841460733194402?fields=business_discovery.username(ian.lamar_){username,website,name,ig_id,id,profile_picture_url,biography,follows_count,followers_count,media_count,media{caption,like_count,comments_count,media_url,permalink,media_type}}&access_token=$token";
 
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $endpoint);
@@ -183,25 +183,33 @@ function parseJsonToDataAllInfluencers($data, $info)
 function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = null, $limit = 10)
 {
     require_once "../../conn/Wamp64Connection.php";
-    $connToUsuarios = getMySQLConnection("Users");
-    $connToAccType = getMySQLConnection("userAccType");
+    $connToUsuarios = getWamp64Connection("Users");
+    $connToAccType = getWamp64Connection("userAccType");
 
     $isSearchingFromSearchView = $search["isSearchingFromSearchiew"];
     $searchQuery = trim(strtolower($search["searchQuery"] ?? ""));
-
 
     $filteredIds = [];
 
     if ($isSearchingFromSearchView) {
         // Construindo a consulta para `Usuarios`
         $queryUsuarios = "
-        SELECT graphInfluencerId
-        FROM UserProfile
-        WHERE (
-            LOWER(userMutableName) LIKE CONCAT('%', LOWER(?), '%') 
-            OR LOWER(userBiography) LIKE CONCAT('%', LOWER(?), '%')
-        )
+            SELECT graphInfluencerId
+            FROM UserProfile
+            WHERE (
+                LOWER(userMutableName) LIKE CONCAT('%', LOWER(?), '%')
+                OR LOWER(userBiography) LIKE CONCAT('%', LOWER(?), '%')
+                OR (
+                    JSON_EXTRACT(userTags, '$.isSetuped') = true
+                    AND (
+                        LOWER(JSON_EXTRACT(userTags, '$.firstTag')) LIKE CONCAT('%', LOWER(?), '%')
+                        OR LOWER(JSON_EXTRACT(userTags, '$.secondTag')) LIKE CONCAT('%', LOWER(?), '%')
+                        OR LOWER(JSON_EXTRACT(userTags, '$.thirdTag')) LIKE CONCAT('%', LOWER(?), '%')
+                    )
+                )
+            )
         ";
+
 
         if ($cursor) {
             $queryUsuarios .= " AND graphInfluencerId > ? ";
@@ -212,10 +220,10 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = nul
         $stmtUsuarios = $connToUsuarios->prepare($queryUsuarios);
 
         if ($cursor) {
-            $stmtUsuarios->bind_param("sssi", $searchQuery, $searchQuery, $cursor, $limit);
+            $stmtUsuarios->bind_param("sssssis", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $cursor, $limit);
         } else {
-            $stmtUsuarios->bind_param("ssi", $searchQuery, $searchQuery, $limit);
-        }
+            $stmtUsuarios->bind_param("sssssi", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $limit);
+        }        
 
         if ($stmtUsuarios->execute()) {
             $resultUsuarios = $stmtUsuarios->get_result();
@@ -269,8 +277,6 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = nul
     // Verificar se há mais elementos disponíveis
     $lastId = end($resultData["graphInfluencerId"]);
 
-    error_log("lastId retornado: $lastId");
-
     if ($lastId) {
         $queryCheck = "
             SELECT 1
@@ -302,8 +308,6 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = nul
     } else {
         $resultData["nextCursor"] = null; 
     }
-    
-
 
     $connToUsuarios->close();
     $connToAccType->close();
@@ -370,8 +374,8 @@ function getInfluencersInfoBatch($arrayGraphInfluencerIds)
 
     require_once "../../conn/Wamp64Connection.php";
 
-    $connUserProfile = getMySQLConnection("users");
-    $connReviews = getMySQLConnection("userAccType");
+    $connUserProfile = getWamp64Connection("users");
+    $connReviews = getWamp64Connection("userAccType");
 
     $idList = implode(',', array_map(fn($id) => "'$id'", $arrayGraphInfluencerIds));
     $queryProfile = "SELECT graphInfluencerId, userLocation, userTags, userBiography 

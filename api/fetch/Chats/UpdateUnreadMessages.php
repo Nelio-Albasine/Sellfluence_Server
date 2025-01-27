@@ -50,7 +50,7 @@ function updateAllUnreadMessages($conn, $chatId, $messagesIds): array {
 
 if ($_SERVER['REQUEST_METHOD'] == "POST") {
     require_once "Wamp64Connection.php";
-    $conn = getMySQLConnection("conversations");
+    $conn = getWamp64Connection("conversations");
 
     $data = json_decode(file_get_contents("php://input"), true);
 

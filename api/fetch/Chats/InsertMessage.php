@@ -18,7 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         require_once "Wamp64Connection.php";
 
-        $conn = getMySQLConnection("conversations");
+        $conn = getWamp64Connection("conversations");
 
         $sql = "INSERT INTO Messages (messageId, chatId, text, isSent, isEdited, readStatus, isProposalMessage)
                 VALUES (?, ?, ?, ?, ?, ?, ?)";

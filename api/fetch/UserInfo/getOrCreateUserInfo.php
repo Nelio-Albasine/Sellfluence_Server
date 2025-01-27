@@ -19,7 +19,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $userInfo = $data["userInfo"];
 
         require_once "../Wamp64Connection.php";
-        $conn = getMySQLConnection("users");
+        $conn = getWamp64Connection("users");
 
         if (!$conn) {
             http_response_code(500);

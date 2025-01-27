@@ -55,7 +55,7 @@ function loadAllMyChats($conn, $participant)
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     try {
         require_once "Wamp64Connection.php";
-        $conn = getMySQLConnection("conversations");
+        $conn = getWamp64Connection("conversations");
 
         $participant = $_GET['participant'];
 

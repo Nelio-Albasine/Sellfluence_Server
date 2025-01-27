@@ -3,8 +3,8 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 header('Content-Type: application/json; charset=utf-8');
 
-require '../connection.php';
-$conn = getDatabaseConnection();
+require '../../conn/Wamp64Connection.php';
+$conn = getWamp64Connection("Sellfluence_Public");
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
@@ -14,7 +14,7 @@ $sqlCreateTable = "CREATE TABLE IF NOT EXISTS Tags (
 )";
 
 if ($conn->query($sqlCreateTable) === TRUE) {
-    echo "Tabela Tags criada com sucesso";
+    echo "Tabela Tags criada com sucesso<br>";
 } else {
     echo "Erro ao criar tabela: " . $conn->error;
 }
@@ -134,6 +134,8 @@ try {
         }
     }
 
+    echo "Tags inseridas com sucesso!";
+    
     $stmt->close();
     $conn->close();
 } catch (mysqli_sql_exception $e) {

@@ -103,7 +103,7 @@ function includeFromMessages($chatId): array
 {
     require_once "../../../api/fetch/Wamp64Connection.php";
 
-    $conn = getMySQLConnection("conversations");
+    $conn = getWamp64Connection("conversations");
 
     $response = [
         "isProposalMessage" => null,

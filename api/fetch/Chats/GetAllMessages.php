@@ -7,7 +7,7 @@ ini_set('error_log', __DIR__ . '/error_getingAllMessages.log');
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     require_once "Wamp64Connection.php";
-    $conn = getMySQLConnection("conversations");
+    $conn = getWamp64Connection("conversations");
 
     if ($conn) {
         if (isset($_GET['chatId'])) {

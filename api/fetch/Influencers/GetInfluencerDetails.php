@@ -14,8 +14,8 @@ if ($_SERVER['REQUEST_METHOD'] == "GET") {
 
 function getInfluencerReview($influencerId) {
     require_once "../Wamp64Connection.php";
-    $connReviews = getMySQLConnection("userAccType");
-    $connUserProfile = getMySQLConnection("users");
+    $connReviews = getWamp64Connection("userAccType");
+    $connUserProfile = getWamp64Connection("users");
 
     $reviews = [];
 

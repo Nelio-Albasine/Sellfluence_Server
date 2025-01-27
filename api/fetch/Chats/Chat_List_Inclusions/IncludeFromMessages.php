@@ -38,7 +38,7 @@ $filePath = "../Wamp64Connection.php";
 if (file_exists($filePath)) {
     require_once $filePath;
 
-       $conn = getMySQLConnection("conversations");
+       $conn = getWamp64Connection("conversations");
 
     $messaesGot = getFromMessages($conn, "814395");
     echo json_encode($messaesGot);

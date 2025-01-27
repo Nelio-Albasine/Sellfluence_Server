@@ -13,7 +13,7 @@ function getFromUserProfile($chatOwner): array
 
     include_once "./Wamp64Connection.php";
 
-    $conn = getMySQLConnection("users");
+    $conn = getWamp64Connection("users");
 
     if ($conn === false) {
         return ["error" => "Falha na conexão com o banco de dados"];
