@@ -4,6 +4,7 @@ ini_set('display_errors', 1);
 ini_set('error_log', __DIR__ . '/error_GetInfluencerDetails.log');
 header('Content-Type: application/json; charset=utf-8');
 
+
 if ($_SERVER['REQUEST_METHOD'] == "GET") {
     $influencerId = $_GET["influencerId"];
     $reviews = getInfluencerReview($influencerId);
