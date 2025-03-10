@@ -7,6 +7,27 @@ header('Content-Type: application/json; charset=utf-8');
 
 $logFile = __DIR__ . '/../../logs/home/error_HomeFiltersInfluencers.log';
 
+/**
+ * @Prioridades:
+ * 1. Estado -> Cidade
+ * 2. Conteúdo (Reel, Stories, etc.)
+ * 3. Preço
+ * 4. Idade (Do influenciador)
+ * 5. Seguidores
+ *
+ * @Regras de Filtragem:
+ * 1. Obter os influencers com base no Estado e Cidade.
+ * 2. Desses influenciadores obtidos, filtrar os que se adequam ao preço definido pelo usuário.
+ * 3. Caso o usuário não tenha definido um preço mínimo e máximo, retornar todos os influenciadores do Estado e Cidade selecionados.
+ * 4. Para os influenciadores resultantes, obter a contagem de seguidores e aplicar as seguintes regras:
+ *    4.1. Se o usuário tiver definido um intervalo de preço, filtrar também pelo número de seguidores:
+ *         - Primeiro, obter todos os influenciadores.
+ *         - Em seguida, dos influenciadores já filtrados, aplicar o filtro de seguidores no banco de dados.
+ *    4.2. Se o usuário não tiver definido um intervalo de preço, retornar os influenciadores sem filtro adicional de seguidores.
+ */
+
+
+
 function logRequest($logFile)
 {
     $requestDetails = [
@@ -53,6 +74,7 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 
 // Extrai as chaves do corpo da requisição e atribui a variáveis
 $selectedAges = $data['selectedAges'] ?? [];
+
 $selectedCities = $data['selectedCities'] ?? [];
 $selectedContentTypes = $data['selectedContentTypes'] ?? [];
 $selectedFollowers = $data['selectedFollowers'] ?? ['max' => 0, 'min' => 0];
@@ -74,33 +96,6 @@ if (!$conn) {
 
 try {
     $response = getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor, $limit);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
 
     if (empty($response)) {
         error_log("Influencers home:" . print_r($finalResponse, true));
@@ -186,41 +181,6 @@ try {
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     curl_multi_close($mh);
 
     // Define o próximo cursor com base na presença de mais itens
@@ -260,11 +220,95 @@ function parseJsonToDataAllInfluencers($data, $info)
     ];
 }
 
-function getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor = null, $limit = 10)
+function getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor = null, $limit = 20)
 {
     require_once "../../conn/Wamp64Connection.php";
     $connToUsuarios = getWamp64Connection("Users");
     $connToAccType = getWamp64Connection("userAccType");
+
+
+    //DataBase: Users: table: userprofile
+
+    //Column: userBirthdate type: DATE 2007-02-27
+    //Return all influencers with this ge ranges
+    //$selectedAges = $data['selectedAges'] ?? []; 
+
+    //Column: userLocation
+    // $selectedCities = $data['selectedCities'] ?? []; 
+    /**
+     * json structure in DB:
+     * {
+     *"userCity": null,
+     *"isSetuped": false, //to check if the selectedCities are setuped
+     *"userState": null,
+     *"userCountry": null
+     *}
+     */
+
+    // $selectedStates = $data['selectedStates'] ?? [];
+    /**
+     * json structure in DB:
+     * {
+     *"userCity": null,
+     *"isSetuped": false, //to check if the selectedStates are setuped
+     *"userState": null,
+     *"userCountry": null
+     *}
+     */
+
+    //Column: userTags 
+    // $selectedNiches = $data['selectedNiches'] ?? []; /*tags is the same proposal to Niches */
+    /**
+     * json structure in DB:
+     *{
+     *"firstTag": "Pets",
+     *"thirdTag": "Bulldog",
+     *"isSetuped": true, //to check if the selectedNiches are setuped
+     *"secondTag": "Rottweiler"
+     */
+
+
+    //DataBase: userAccType: Table: influencers
+
+    //Column: ContentTypes
+    // $selectedContentTypes = $data['selectedContentTypes'] ?? [];
+    /**
+     * json structure in DB:
+     *{
+     *"reels": true,
+     *"stories": true,
+     *"isSetuped": true, //to check if the ContentTypes are setuped
+     *"videos": false
+     *"posts": false
+     */
+
+    //Column: ContentPrices
+    // $selectedPrices = $data['selectedPrices'] ?? ['max' => 0.0, 'min' => 0.0];
+    //if user as selected ContentTypes like reels and stories, we gona return influencers who match the min and max range selectedPrices
+    /**
+     * json structure in DB:
+     *{
+     *"reels": {
+        *min: 10,
+        *max: 100,
+     *},
+     *"stories":  {
+        *min: 10,
+        *max: 100,
+     *},
+     *"isSetuped": true, //to check if the selectedPrices are setuped
+     *"videos":  {
+        *min: 10,
+        *max: 100,
+     *},
+     *"posts":  {
+        *min: 10,
+        *max: 100,
+     *},
+     */
+    
+    // $cursor = isset($data['cursor']) && $data['cursor'] !== 'null' ? $data['cursor'] : null;
+
 
     $isSearchingFromSearchView = $search["isSearchingFromSearchiew"];
     $searchQuery = trim(strtolower($search["searchQuery"] ?? ""));

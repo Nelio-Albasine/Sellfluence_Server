@@ -1,5 +1,5 @@
 <?php
-//Obtaining acces token.php file
+//Obtaining access token.php file
 session_start();
 
 // Ativando a exibição de erros para desenvolvimento.
@@ -10,25 +10,51 @@ error_reporting(E_ALL);
 // Inclusão do arquivo de definições de constantes.
 require_once 'defines.php';
 
-// Carregamento do Facebook Graph SDK.
+// Carregamento do Facebook Business SDK.
 require_once __DIR__ . '/vendor/autoload.php';
 
-// Array com credenciais do Facebook.
-$creds = [
-    'app_id' => FACEBOOK_APP_ID,
-    'app_secret' => FACEBOOK_APP_SECRET,
-    'default_graph_version' => 'v18.0', 
-    'persistent_data_handler' => 'session'
-];
+// Importações necessárias do SDK de negócios
+use FacebookAds\Api;
+use FacebookAds\Logger\CurlLogger;
+use FacebookAds\Object\InstagramUser;
+use FacebookAds\Object\Page;
+use FacebookAds\Object\User;
 
-$facebook = new Facebook\Facebook($creds);
-$helper = $facebook->getRedirectLoginHelper();
+// Inicializando a API do Facebook
+Api::init(FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, null);
+
+// Para debugging (opcional)
+// Api::instance()->setLogger(new CurlLogger());
+
+// Função para gerar a URL de login
+function getLoginUrl($redirectUri, $permissions) {
+    $state = md5(uniqid(rand(), true));
+    $_SESSION['FBRLH_state'] = $state;
+    
+    $params = [
+        'client_id' => FACEBOOK_APP_ID,
+        'redirect_uri' => $redirectUri,
+        'state' => $state,
+        'response_type' => 'code',
+        'scope' => implode(',', $permissions)
+    ];
+    
+    return 'https://www.facebook.com/v18.0/dialog/oauth?' . http_build_query($params);
+}
+
+// Definindo permissões
 $permissions = ['public_profile', 'instagram_basic', 'pages_show_list'];
 
-// Cliente OAuth2.
-$oAuth2Client = $facebook->getOAuth2Client();
-$loginUrl = $helper->getLoginUrl(FACEBOOK_REDIRECT_URI, $permissions);
+// Gerando URL de login
+try {
+    $loginUrl = getLoginUrl(FACEBOOK_REDIRECT_URI, $permissions);  
+} catch (Exception $e) {
+    // Fallback em caso de erro
+    $loginUrl = '#';
+    echo 'Error: ' . $e->getMessage();
+}
 
+// Set userId in localStorage
 if(isset($_GET['userId'])) {
     $userId = $_GET['userId'];
     echo '<script>';
@@ -40,18 +66,6 @@ if(isset($_GET['userId'])) {
     echo '</script>';
 }
 
-if (isset($_GET['userId'])) {
-    $userId = $_GET['userId'];
-    echo '<script>';
-    echo 'localStorage.setItem("myId", ' . json_encode($userId) . ');';
-    echo '</script>';
-} else {
-    echo '<script>';
-    echo 'localStorage.setItem("myId", "emptyId");';
-    echo '</script>';
-}
-
-
 echo '
     <!DOCTYPE html>
     <html lang="en">
@@ -59,7 +73,7 @@ echo '
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Document</title>
+        <title>Sellfluence - Vinculação Instagram</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 
         <style>

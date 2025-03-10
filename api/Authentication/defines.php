@@ -3,7 +3,7 @@
 
 define('FACEBOOK_APP_ID', '439637211477393');
 define('FACEBOOK_APP_SECRET', 'c881f0870e9a9582f5e2f33fc5f66e52');
-define('FACEBOOK_REDIRECT_URI', 'https://sellfluence.com.br/0/Authentication/Success_Linked.php');
+define('FACEBOOK_REDIRECT_URI', 'http://localhost/Selfluence/api/Authentication/Success_Linked.php');
 define('ENDPOINT_BASE', 'https://graph.facebook.com/v18.0/');
 
 //Acess token

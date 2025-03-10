@@ -8,7 +8,6 @@ header('Content-Type: application/json; charset=utf-8');
 
 $logFile = __DIR__ . '/../../logs/home/error_GetHomeInfluencers.log';
 
-
 function logRequest($logFile)
 {
     $requestDetails = [

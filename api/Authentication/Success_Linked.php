@@ -8,76 +8,117 @@ error_reporting(E_ALL);
 require_once 'defines.php';
 require_once __DIR__ . '/vendor/autoload.php';
 
-$creds = [
-    'app_id' => FACEBOOK_APP_ID,
-    'app_secret' => FACEBOOK_APP_SECRET,
-    'default_graph_version' => 'v18.0',
-    'persistent_data_handler' => 'session'
-];
+// Importações necessárias do SDK de negócios
+use FacebookAds\Api;
 
-$facebook = new Facebook\Facebook($creds);
-$helper = $facebook->getRedirectLoginHelper();
-$oAuth2Client = $facebook->getOAuth2Client();
+// Inicializando a API do Facebook
+Api::init(FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, null);
+
+// Para debugging (opcional)
+// Api::instance()->setLogger(new CurlLogger());
+
 $accessToken = null;
 $uid = null;
-$username = null;
 $name = null;
 
-if (isset($_GET['state'])) {
-    $helper->getPersistentDataHandler()->set('state', $_GET['state']);
-    //this code will 
-} else {
-    echo 'The state parameter is not available in the URL';
+// Função para obter token de acesso do código de autorização
+function getAccessTokenFromCode($code, $redirectUri) {
+    $params = [
+        'client_id' => FACEBOOK_APP_ID,
+        'client_secret' => FACEBOOK_APP_SECRET,
+        'redirect_uri' => $redirectUri,
+        'code' => $code
+    ];
+    
+    $ch = curl_init('https://graph.facebook.com/v18.0/oauth/access_token');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params, '', '&'));
+    curl_setopt($ch, CURLOPT_POST, true);
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    curl_close($ch);
+    
+    if ($error) {
+        throw new Exception('cURL Error: ' . $error);
+    }
+    
+    $data = json_decode($response, true);
+    
+    if (isset($data['error'])) {
+        throw new Exception('API Error: ' . $data['error']['message']);
+    }
+    
+    return $data['access_token'];
+}
+
+// Função para trocar token de curta duração por longa duração
+function getLongLivedAccessToken($accessToken) {
+    $params = [
+        'grant_type' => 'fb_exchange_token',
+        'client_id' => FACEBOOK_APP_ID,
+        'client_secret' => FACEBOOK_APP_SECRET,
+        'fb_exchange_token' => $accessToken
+    ];
+    
+    $ch = curl_init('https://graph.facebook.com/v18.0/oauth/access_token');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params, '', '&'));
+    curl_setopt($ch, CURLOPT_POST, true);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    
+    $data = json_decode($response, true);
+    
+    if (isset($data['error'])) {
+        throw new Exception('API Error: ' . $data['error']['message']);
+    }
+    
+    return $data['access_token'];
+}
+
+// Função para obter dados do usuário
+function getUserData($accessToken) {
+    $url = "https://graph.facebook.com/v18.0/me?fields=id,name&access_token=" . urlencode($accessToken);
+    
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    
+    return json_decode($response, true);
 }
 
 try {
-    // Obtém o access token usando o helper.
-    $accessToken = $helper->getAccessToken();
-
-    if (!$accessToken->isLongLived()) { // exchange short for long
-        try {
-            $accessToken = $oAuth2Client->getLongLivedAccessToken($accessToken);
-            $response = $facebook->get('/me?fields=id,name', $accessToken->getValue());
-            $user = $response->getGraphUser();
-            $uid = $user->getId();
-            $name = $user->getName();
-
-            /*   $url = "https://graph.instagram.com/v18.0/{$uid}?fields=id,username&access_token={$accessToken}";
-               $ch = curl_init($url);
-               curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-               $response = curl_exec($ch);
-               curl_close($ch);
-               $data = json_decode($response, true);
-               if (isset($data['username'])) {
-                   $username = $data['username'];
-                   echo "Instagram username: $username";
-               } else {
-                    echo "Failed to retrieve username. Response: " . print_r($response, true);
-               }   */
-
-
-            echo 'Name: ' . $name . '<br>';
-            echo 'Uid do user: ' . $uid . '<br>';
-            //send to firestore
-
-
-        } catch (Facebook\Exceptions\FacebookSDKException $e) {
-            echo 'Tray catched about acces access token: ' . $e->getMessage();
+    if (isset($_GET['code'])) {
+        // Obtém o token de acesso usando o código
+        $accessToken = getAccessTokenFromCode($_GET['code'], FACEBOOK_REDIRECT_URI);
+        
+        // Converte para token de longa duração
+        $longLivedToken = getLongLivedAccessToken($accessToken);
+        
+        // Atualiza o token
+        $accessToken = $longLivedToken;
+        
+        // Obtém informações do usuário
+        $userData = getUserData($accessToken);
+        
+        if (isset($userData['id'])) {
+            $uid = $userData['id'];
         }
-    } else {
-        // O token já é de longa duração
+        
+        if (isset($userData['name'])) {
+            $name = $userData['name'];
+        }
+        
+        // Aqui você pode salvar o token no banco de dados ou em uma sessão
+        // $_SESSION['fb_access_token'] = $accessToken;
     }
-} catch (Facebook\Exceptions\FacebookResponseException $e) {
-    echo 'Graph returned an error: ' . htmlspecialchars($e->getMessage());
-    error_log('Graph API error: ' . $e->getMessage() . ' in ' . __FILE__ . ' on line ' . __LINE__);
-} catch (Facebook\Exceptions\FacebookSDKException $e) {
-    echo 'Facebook SDK returned an error: ' . htmlspecialchars($e->getMessage());
-    error_log('SDK error: ' . $e->getMessage() . ' in ' . __FILE__ . ' on line ' . __LINE__);
 } catch (Exception $e) {
-    echo 'Other error occurred: ' . htmlspecialchars($e->getMessage());
-    error_log('General error: ' . $e->getMessage() . ' in ' . __FILE__ . ' on line ' . __LINE__);
+    echo 'Erro: ' . htmlspecialchars($e->getMessage());
+    error_log('Erro: ' . $e->getMessage() . ' em ' . __FILE__ . ' na linha ' . __LINE__);
 }
 
+// Início do HTML
 echo '
 <!DOCTYPE html>
 <html lang="en">
@@ -85,7 +126,7 @@ echo '
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Conta Vinculada</title>
 
     <style>
         * {
@@ -139,10 +180,22 @@ echo '
             color: white;
             box-shadow: 1px 1px 2px green;
             transition: 0.3s;
+            cursor: pointer;
         }
 
         button:hover {
             padding: 9px 22px;
+        }
+
+        .token-display {
+            max-width: 300px;
+            word-break: break-all;
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+            font-size: 12px;
+            color: #333;
         }
 
         @media only screen and (max-width: 728px) {
@@ -164,6 +217,10 @@ echo '
             p {
                 margin-top: 20px;
             }
+            
+            .token-display {
+                max-width: 280px;
+            }
         }
     </style>
 </head>
@@ -174,36 +231,48 @@ echo '
         <h1>Parabéns</h1>
         <h3>Conta vinculada com sucesso!</h3>
 
-        <p>Access Token: ';
+        <p>Access Token:</p>
+        <div class="token-display">';
+        
 if ($accessToken) {
-    echo htmlspecialchars($accessToken->getValue());
+    echo htmlspecialchars(substr($accessToken, 0, 50) . '...');
 } else {
     echo 'Access Token não disponível';
 }
 
-echo '</p>
+echo '</div>
 
- <p id="myIdParagraph">
- 
- <br>
- 
- O UID do usuário do insta é: ';
+        <p>Usuário:</p>
+        <div class="token-display">';
 
-if ($uid) {
-    echo $uid;
+if ($name) {
+    echo htmlspecialchars($name);
 } else {
-    echo 'UID do insta não disponível';
+    echo 'Nome não disponível';
 }
 
-echo '</p>
+echo '</div>
 
-        <br>
+        <p>ID do Facebook:</p>
+        <div class="token-display">';
+
+if ($uid) {
+    echo htmlspecialchars($uid);
+} else {
+    echo 'ID não disponível';
+}
+
+echo '</div>
+
         <script>
             document.addEventListener("DOMContentLoaded", function () {
                 let myId = localStorage.getItem("myId");
 
                 if (myId) {
-                    document.getElementById("myIdParagraph").textContent = "Valor de myId: " + myId;
+                    // Pode adicionar um elemento para exibir o ID aqui se necessário
+                    console.log("ID do Usuário: " + myId);
+                    
+                    // Remove o ID após uso
                     setTimeout(function() {
                       localStorage.removeItem("myId");
                       console.log("Item removido após 50ms.");
@@ -212,9 +281,15 @@ echo '</p>
                     console.log("Nenhum valor encontrado no localStorage.");
                 }
             });
+            
+            // Função para voltar ao app
+            function voltarParaApp() {
+                // Substitua pela URL real do seu app
+                window.location.href = "/";
+            }
         </script>
 
-        <button>Voltar para o App</button>
+        <button onclick="voltarParaApp()">Voltar para o App</button>
     </div>
 </body>
 
