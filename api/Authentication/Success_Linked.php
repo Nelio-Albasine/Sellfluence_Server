@@ -2,7 +2,10 @@
 session_start();
 
 ini_set('display_errors', 1);
+ini_set('log_errors', 1);
 ini_set('display_startup_errors', 1);
+ini_set('error_log', __DIR__ . '/error_success_linked.log');
+
 error_reporting(E_ALL);
 
 require_once 'defines.php';
@@ -98,6 +101,7 @@ try {
         
         // Atualiza o token
         $accessToken = $longLivedToken;
+        error_log($accessToken);
         
         // Obtém informações do usuário
         $userData = getUserData($accessToken);

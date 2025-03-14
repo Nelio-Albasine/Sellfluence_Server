@@ -7,26 +7,11 @@ header('Content-Type: application/json; charset=utf-8');
 
 $logFile = __DIR__ . '/../../logs/home/error_HomeFiltersInfluencers.log';
 
-/**
- * @Prioridades:
- * 1. Estado -> Cidade
- * 2. Conteúdo (Reel, Stories, etc.)
- * 3. Preço
- * 4. Idade (Do influenciador)
- * 5. Seguidores
- *
- * @Regras de Filtragem:
- * 1. Obter os influencers com base no Estado e Cidade.
- * 2. Desses influenciadores obtidos, filtrar os que se adequam ao preço definido pelo usuário.
- * 3. Caso o usuário não tenha definido um preço mínimo e máximo, retornar todos os influenciadores do Estado e Cidade selecionados.
- * 4. Para os influenciadores resultantes, obter a contagem de seguidores e aplicar as seguintes regras:
- *    4.1. Se o usuário tiver definido um intervalo de preço, filtrar também pelo número de seguidores:
- *         - Primeiro, obter todos os influenciadores.
- *         - Em seguida, dos influenciadores já filtrados, aplicar o filtro de seguidores no banco de dados.
- *    4.2. Se o usuário não tiver definido um intervalo de preço, retornar os influenciadores sem filtro adicional de seguidores.
- */
+// Inclui a função de conversão de estado
+require_once "StateConverter.php";
 
-
+// Inclui a função de debug de usuário específico
+require_once "DebugSpecificInfluencer.php";
 
 function logRequest($logFile)
 {
@@ -72,20 +57,38 @@ if (json_last_error() !== JSON_ERROR_NONE) {
     exit;
 }
 
-// Extrai as chaves do corpo da requisição e atribui a variáveis
-$selectedAges = $data['selectedAges'] ?? [];
-
-$selectedCities = $data['selectedCities'] ?? [];
-$selectedContentTypes = $data['selectedContentTypes'] ?? [];
-$selectedFollowers = $data['selectedFollowers'] ?? ['max' => 0, 'min' => 0];
-$selectedNiches = $data['selectedNiches'] ?? [];
-$selectedPrices = $data['selectedPrices'] ?? ['max' => 0.0, 'min' => 0.0];
-$selectedStates = $data['selectedStates'] ?? [];
-$cursor = isset($data['cursor']) && $data['cursor'] !== 'null' ? $data['cursor'] : null;
-
-$limit = 10;
-
 require_once "../../conn/Wamp64Connection.php";
+require_once "FetchCustomFilteredInfluencersInGraphAPI.php";
+
+// ============= MODO DEBUG PARA USUÁRIO ESPECÍFICO =============
+// Defina como true para testar apenas o usuário específico
+$debugMode = false;
+$specificUserId = "123456789_0";
+
+if ($debugMode) {
+    error_log("MODO DEBUG ATIVADO para usuário específico: $specificUserId");
+    $debugResults = debugSpecificUser($data, $specificUserId);
+
+    // Retorna os resultados de debug ao cliente
+    echo json_encode([
+        'debugMode' => true,
+        'userTested' => $specificUserId,
+        'debugResults' => $debugResults,
+        'data' => $debugResults['filtersPassed'] ?
+            [
+                'graphInfluencerUserName' => [$specificUserId],
+                'graphInfluencerId' => [$specificUserId]
+            ] :
+            [
+                'graphInfluencerUserName' => [],
+                'graphInfluencerId' => []
+            ],
+        'nextCursor' => null
+    ]);
+    exit;
+}
+
+// ============= CÓDIGO NORMAL CONTINUA ABAIXO =============
 
 $conn = getWamp64Connection("userAccType");
 
@@ -93,114 +96,467 @@ if (!$conn) {
     die("Erro: Falha na conexão com o banco de dados.");
 }
 
-
 try {
-    $response = getAllInfluencersInstaGramuserNamesAndIdsByQuery($search, $cursor, $limit);
-
-    if (empty($response)) {
-        error_log("Influencers home:" . print_r($finalResponse, true));
-
-        echo json_encode($finalResponse);
-        if ($conn) {
-            $conn->close();
-        }
-        exit;
-    }
-
-    $graphInfluencerUserNames = $response["graphInfluencerUserName"];
-    $graphInfluencerIds = $response["graphInfluencerId"];
-    $hasMoreItems = $response["hasMoreItems"];
-
-    $additionalInfo = getInfluencersInfoBatch($graphInfluencerIds);
-
-    $parsedData = [];
-    $curlMulti = [];
-    $mh = curl_multi_init();
-
-    foreach ($graphInfluencerUserNames as $index => $influencerAtual) {
-        $endpoint = "https://graph.facebook.com/v18.0/$accountId?fields=business_discovery.username($influencerAtual){username,website,name,ig_id,id,profile_picture_url,biography,follows_count,followers_count}&access_token=$token";
-        // $endpoint = "https://graph.facebook.com/v18.0/17841460733194402?fields=business_discovery.username(ian.lamar_){username,website,name,ig_id,id,profile_picture_url,biography,follows_count,followers_count,media_count,media{caption,like_count,comments_count,media_url,permalink,media_type}}&access_token=$token";
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $endpoint);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_HEADER, true); // Inclui cabeçalhos na resposta para verificar status HTTP
-        $curlMulti[$index] = $ch;
-        curl_multi_add_handle($mh, $ch);
-    }
-
-    $running = null;
-    do {
-        curl_multi_exec($mh, $running);
-    } while ($running);
-
-    foreach ($curlMulti as $index => $ch) {
-        $rawResponse = curl_multi_getcontent($ch);
-        curl_multi_remove_handle($mh, $ch);
-
-        // Separa cabeçalhos e corpo da resposta
-        $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-        $headers = substr($rawResponse, 0, $headerSize);
-        $body = substr($rawResponse, $headerSize);
-
-        // Verifica código de status HTTP
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-        if ($httpCode !== 200) {
-            error_log("Erro na requisição cURL para o influenciador {$graphInfluencerUserNames[$index]}: HTTP $httpCode");
-            error_log("Cabeçalhos: $headers");
-            error_log("Corpo: $body");
-
-            if ($httpCode === 401) {
-                error_log("Token expirado ou inválido.");
-            } elseif ($httpCode === 403) {
-                error_log("Acesso negado para o endpoint.");
-            } elseif ($httpCode === 400) {
-                error_log("Requisição inválida.");
-            }
-
-            continue; // Pula para o próximo influenciador
-        }
-
-        $influencerId = $graphInfluencerIds[$index];
-        $businessDiscoveryJson = json_decode($body, true)['business_discovery'] ?? null;
-        error_log("businessDiscoveryJson:" . print_r($businessDiscoveryJson, true));
-
-        if ($businessDiscoveryJson) {
-            $info = $additionalInfo[$influencerId] ?? [
-                'location' => null,
-                'tags' => '',
-                'biography' => null,
-                'averageRating' => 0,
-            ];
-
-            $parsedData[] = parseJsonToDataAllInfluencers($businessDiscoveryJson, $info);
-        }
-    }
-
-
-    curl_multi_close($mh);
-
-    // Define o próximo cursor com base na presença de mais itens
-    $nextCursor = null;
-    if (!empty($response)) {
-        $nextCursor = $hasMoreItems ? end($graphInfluencerIds) : null;
-    }
-
     $finalResponse = [
-        'data' => $parsedData,
-        'nextCursor' => $nextCursor,
+        'data' => [],
+        'nextCursor' => null,
     ];
 
-    error_log("Influencers home:" . print_r($finalResponse, true));
+    $cursor = isset($data['cursor']) ? $data['cursor'] : null;
+    $response = getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor);
+
+    if (!empty($response)) {
+        $finalResponse['data'] = [
+            'graphInfluencerUserName' => $response['graphInfluencerUserName'],
+            'graphInfluencerId' => $response['graphInfluencerId']
+        ];
+        $finalResponse['nextCursor'] = $response['nextCursor'];
+    }
+
+    $graphInfluencerUserNameArrays = $finalResponse["data"]["graphInfluencerUserName"];
+    $graphInfluencerIdsArrays = $finalResponse["data"]["graphInfluencerId"];
+
+    $queredInfluencers = fetchInfluencersData($graphInfluencerUserNameArrays, $graphInfluencerIdsArrays);
 
     echo json_encode($finalResponse);
+
+    error_log("queredInfluencers data: " . json_encode(array_map(function ($item) {
+        return [
+            'username' => $item['graphInfluencerUserName'],
+            'id' => $item['graphInfluencerId'],
+            'name' => $item['apiData']['name'] ?? 'N/A',
+            'followers' => $item['apiData']['followers_count'] ?? 0
+        ];
+    }, $queredInfluencers['data']), JSON_PRETTY_PRINT));
+
+
+    if ($conn) {
+        $conn->close();
+    }
 } catch (\Throwable $th) {
     error_log("Ocorreu um erro: " . $th->getMessage());
+    http_response_code(500);
+    echo json_encode(['error' => 'Internal server error']);
 }
 
+function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor = null, $limit = 20)
+{
+    error_log("=========== INÍCIO DA EXECUÇÃO (NOVA ABORDAGEM) ===========");
+    error_log("Filtros recebidos: " . json_encode($filterItems, JSON_PRETTY_PRINT));
+
+    require_once "../../conn/Wamp64Connection.php";
+    $connToUsuarios = getWamp64Connection("Users");
+    $connToAccType = getWamp64Connection("UserAccType");
+
+    error_log("Conexões estabelecidas com bancos 'Users' e 'UserAccType'");
+
+    // Extrair parâmetros de filtro
+    $cursor = isset($filterItems['cursor']) && $filterItems['cursor'] !== 'null' ? $filterItems['cursor'] : null;
+    $selectedNiches = $filterItems['selectedNiches'] ?? [];
+    $selectedAges = $filterItems['selectedAges'] ?? [];
+    $selectedCities = $filterItems['selectedCities'] ?? [];
+    $selectedContentTypes = $filterItems['selectedContentTypes'] ?? [];
+    $selectedStates = $filterItems['selectedStates'] ?? [];
+    $selectedFollowers = $filterItems['selectedFollowers'] ?? ['min' => 0, 'max' => 0];
+    $selectedPrices = $filterItems['selectedPrices'] ?? ['min' => 0, 'max' => 0];
+
+    error_log("Parâmetros de filtro extraídos:");
+    error_log("- Cursor: " . ($cursor ?? "null"));
+    error_log("- Nichos: " . json_encode($selectedNiches));
+    error_log("- Idades: " . json_encode($selectedAges));
+    error_log("- Cidades: " . json_encode($selectedCities));
+    error_log("- Estados: " . json_encode($selectedStates));
+    error_log("- Tipos de Conteúdo: " . json_encode($selectedContentTypes));
+    error_log("- Seguidores (min/max): " . $selectedFollowers['min'] . "/" . $selectedFollowers['max']);
+    error_log("- Preços (min/max): " . $selectedPrices['min'] . "/" . $selectedPrices['max']);
+
+    // FASE 1: Obter batch de IDs iniciais
+    error_log("======= FASE 1: OBTENDO BATCH DE IDs INICIAIS =======");
+
+    // Vamos pegar um número maior de IDs para ter mais chances de encontrar matches após a filtragem
+    $batchSize = $limit * 10;
+    $batchQuery = "SELECT graphInfluencerId FROM UserProfile";
+
+    // Adicionar condição para o cursor
+    if ($cursor) {
+        $batchQuery .= " WHERE graphInfluencerId > ?";
+        $cursorParam = [$cursor];
+    } else {
+        $cursorParam = [];
+    }
+
+    $batchQuery .= " ORDER BY graphInfluencerId ASC LIMIT ?";
+    $params = array_merge($cursorParam, [$batchSize]);
+
+    error_log("Query para obter batch inicial: " . $batchQuery);
+    error_log("Parâmetros: " . json_encode($params));
+
+    $stmt = $connToUsuarios->prepare($batchQuery);
+
+    if ($stmt) {
+        if (!empty($params)) {
+            $types = str_repeat("s", count($params));
+            $stmt->bind_param($types, ...$params);
+        }
+
+        $candidateIds = [];
+
+        if ($stmt->execute()) {
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                $candidateIds[] = $row['graphInfluencerId'];
+            }
+            error_log("Obtidos " . count($candidateIds) . " IDs de candidatos do batch inicial");
+        } else {
+            error_log("ERRO ao executar query de batch: " . $stmt->error);
+        }
+
+        $stmt->close();
+    } else {
+        error_log("ERRO ao preparar statement de batch: " . $connToUsuarios->error);
+    }
+
+    if (empty($candidateIds)) {
+        error_log("Nenhum ID de candidato encontrado. Retornando resultado vazio.");
+        return ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "nextCursor" => null, "hasMoreItems" => false];
+    }
+
+    // FASE 2: Verificação individual de cada ID
+    error_log("======= FASE 2: VERIFICANDO CADA ID INDIVIDUALMENTE =======");
+
+    $filteredIds = [];
+    $currentYear = date('Y');
+
+    // Preparar queries para verificações individuais
+    $userProfileQuery = "SELECT 
+        graphInfluencerId, 
+        userTags, 
+        userLocation, 
+        userBirthdate
+    FROM UserProfile 
+    WHERE graphInfluencerId = ?";
+
+    $contentPricesQuery = "SELECT ContentPrices FROM Influencers WHERE graphInfluencerId = ?";
+
+    // Preparar statements
+    $stmtUserProfile = $connToUsuarios->prepare($userProfileQuery);
+    $stmtContentPrices = $connToAccType->prepare($contentPricesQuery);
+
+    if (!$stmtUserProfile || !$stmtContentPrices) {
+        error_log("ERRO ao preparar statements para verificação individual");
+        return ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "nextCursor" => null, "hasMoreItems" => false];
+    }
+
+    foreach ($candidateIds as $candidateId) {
+        // Iniciar assumindo que o candidato passa em todos os filtros
+        $passesAllFilters = true;
+        $filterLogs = [];
+
+        // Obter dados do perfil do usuário
+        $stmtUserProfile->bind_param("s", $candidateId);
+
+        if ($stmtUserProfile->execute()) {
+            $userProfileResult = $stmtUserProfile->get_result();
+            $userData = $userProfileResult->fetch_assoc();
+
+            if (!$userData) {
+                // Perfil não encontrado, pular para o próximo candidato
+                $filterLogs[] = "Perfil não encontrado";
+                $passesAllFilters = false;
+                continue;
+            }
+
+            // Decodificar campos JSON
+            $userTags = json_decode($userData['userTags'], true);
+            $userLocation = json_decode($userData['userLocation'], true);
+            $userBirthdate = $userData['userBirthdate'];
+
+            // Verificar nichos/tags
+            if (!empty($selectedNiches) && $passesAllFilters) {
+                $passesNichesFilter = false;
+
+                if (isset($userTags['isSetuped']) && $userTags['isSetuped']) {
+                    $firstTag = $userTags['firstTag'] ?? '';
+                    $secondTag = $userTags['secondTag'] ?? '';
+                    $thirdTag = $userTags['thirdTag'] ?? '';
+
+                    foreach ($selectedNiches as $niche) {
+                        if (
+                            stripos($firstTag, $niche) !== false ||
+                            stripos($secondTag, $niche) !== false ||
+                            stripos($thirdTag, $niche) !== false
+                        ) {
+                            $passesNichesFilter = true;
+                            $filterLogs[] = "Passou no filtro de nicho: Encontrado '$niche'";
+                            break;
+                        }
+                    }
+                }
+
+                if (!$passesNichesFilter) {
+                    $filterLogs[] = "Falhou no filtro de nichos";
+                    $passesAllFilters = false;
+                }
+            }
+
+            // Verificar idade
+            if (!empty($selectedAges) && $passesAllFilters && $userBirthdate) {
+                $birthYear = date('Y', strtotime($userBirthdate));
+                $passesAgeFilter = false;
+
+                foreach ($selectedAges as $ageRange) {
+                    if (preg_match('/(\d+)-(\d+)/', $ageRange, $matches)) {
+                        $minAge = $matches[1];
+                        $maxAge = $matches[2];
+
+                        $maxBirthYear = $currentYear - $minAge;
+                        $minBirthYear = $currentYear - $maxAge;
+
+                        if ($birthYear >= $minBirthYear && $birthYear <= $maxBirthYear) {
+                            $passesAgeFilter = true;
+                            $filterLogs[] = "Passou no filtro de idade: $ageRange";
+                            break;
+                        }
+                    }
+                }
+
+                if (!$passesAgeFilter) {
+                    $filterLogs[] = "Falhou no filtro de idade, ano nascimento: $birthYear";
+                    $passesAllFilters = false;
+                }
+            }
+
+            // Verificar cidade
+            if (!empty($selectedCities) && $passesAllFilters) {
+                $passesCityFilter = false;
+                $userCity = strtolower($userLocation['userCity'] ?? '');
+
+                foreach ($selectedCities as $city) {
+                    if (strtolower($city) === $userCity) {
+                        $passesCityFilter = true;
+                        $filterLogs[] = "Passou no filtro de cidade: $city";
+                        break;
+                    }
+                }
+
+                if (!$passesCityFilter) {
+                    $filterLogs[] = "Falhou no filtro de cidade, cidade do usuário: $userCity";
+                    $passesAllFilters = false;
+                }
+            }
+
+            // Verificar estado
+            if (!empty($selectedStates) && $passesAllFilters) {
+                $passesStateFilter = false;
+                $userState = strtolower($userLocation['userState'] ?? '');
+
+                foreach ($selectedStates as $stateAbbr) {
+                    $stateFullName = convertStateAbbreviationToFullName($stateAbbr);
+                    $stateFullNameLower = strtolower($stateFullName ?? $stateAbbr);
+
+                    if ($stateFullNameLower === $userState) {
+                        $passesStateFilter = true;
+                        $filterLogs[] = "Passou no filtro de estado: $stateAbbr -> $stateFullName";
+                        break;
+                    }
+                }
+
+                if (!$passesStateFilter) {
+                    $filterLogs[] = "Falhou no filtro de estado, estado do usuário: $userState";
+                    $passesAllFilters = false;
+                }
+            }
+
+            // Ignorar verificação de seguidores
+            // Os seguidores serão obtidos posteriormente via API do Facebook
+            if (($selectedFollowers['min'] > 0 || $selectedFollowers['max'] > 0) && $passesAllFilters) {
+                $filterLogs[] = "Filtro de seguidores ignorado - será processado posteriormente via API";
+            }
+
+            // Verificar preço
+            if (($selectedPrices['min'] > 0 || $selectedPrices['max'] > 0) && $passesAllFilters) {
+                $stmtContentPrices->bind_param("s", $candidateId);
+
+                if ($stmtContentPrices->execute()) {
+                    $contentPricesResult = $stmtContentPrices->get_result();
+                    $contentPricesData = $contentPricesResult->fetch_assoc();
+
+                    if (!$contentPricesData) {
+                        $filterLogs[] = "Falhou no filtro de preço: Dados de preço não encontrados";
+                        $passesAllFilters = false;
+                    } else {
+                        $contentPrices = json_decode($contentPricesData['ContentPrices'], true);
+                        $passesPriceFilter = false;
+
+                        // Verificar se o ContentPrices está configurado
+                        if (isset($contentPrices['isSetuped']) && $contentPrices['isSetuped']) {
+                            // Verificar os preços para cada tipo de conteúdo
+                            $priceTypes = ['posts', 'reels', 'videos', 'stories'];
+
+                            foreach ($priceTypes as $priceType) {
+                                if (isset($contentPrices[$priceType])) {
+                                    $typeMinPrice = $contentPrices[$priceType]['min'] ?? 0;
+                                    $typeMaxPrice = $contentPrices[$priceType]['max'] ?? 0;
+
+                                    // Se o preço mínimo do usuário está dentro da faixa solicitada
+                                    if (
+                                        $selectedPrices['min'] <= $typeMinPrice &&
+                                        ($selectedPrices['max'] == 0 || $typeMinPrice <= $selectedPrices['max'])
+                                    ) {
+                                        $passesPriceFilter = true;
+                                        $filterLogs[] = "Passou no filtro de preço para $priceType: min=$typeMinPrice, max=$typeMaxPrice";
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!$passesPriceFilter) {
+                            $filterLogs[] = "Falhou no filtro de preço";
+                            $passesAllFilters = false;
+                        }
+                    }
+                } else {
+                    $filterLogs[] = "Erro ao consultar preços: " . $stmtContentPrices->error;
+                    $passesAllFilters = false;
+                }
+            }
+
+            // Verificar tipos de conteúdo
+            if (!empty($selectedContentTypes) && $passesAllFilters) {
+                $stmtContentPrices->bind_param("s", $candidateId);
+
+                if ($stmtContentPrices->execute()) {
+                    $contentTypesResult = $stmtContentPrices->get_result();
+                    $contentData = $contentTypesResult->fetch_assoc();
+
+                    if (!$contentData) {
+                        $filterLogs[] = "Falhou no filtro de tipo de conteúdo: Dados não encontrados";
+                        $passesAllFilters = false;
+                    } else {
+                        $contentPrices = json_decode($contentData['ContentPrices'], true);
+                        $passesContentTypeFilter = false;
+
+                        foreach ($selectedContentTypes as $contentType) {
+                            $contentKey = '';
+
+                            switch (strtolower($contentType)) {
+                                case 'stories':
+                                    $contentKey = 'stories';
+                                    break;
+                                case 'reel':
+                                case 'reels':
+                                    $contentKey = 'reels';
+                                    break;
+                                case 'post':
+                                case 'posts':
+                                    $contentKey = 'posts';
+                                    break;
+                                case 'video':
+                                case 'videos':
+                                    $contentKey = 'videos';
+                                    break;
+                            }
+
+                            if (!empty($contentKey) && isset($contentPrices[$contentKey]) && is_array($contentPrices[$contentKey])) {
+                                $passesContentTypeFilter = true;
+                                $filterLogs[] = "Passou no filtro de tipo de conteúdo: $contentType";
+                                break;
+                            }
+                        }
+
+                        if (!$passesContentTypeFilter) {
+                            $filterLogs[] = "Falhou no filtro de tipo de conteúdo";
+                            $passesAllFilters = false;
+                        }
+                    }
+                } else {
+                    $filterLogs[] = "Erro ao consultar tipos de conteúdo: " . $stmtContentPrices->error;
+                    $passesAllFilters = false;
+                }
+            }
+        } else {
+            $filterLogs[] = "Erro ao consultar perfil: " . $stmtUserProfile->error;
+            $passesAllFilters = false;
+        }
+
+        // Registrar o resultado da verificação
+        if ($passesAllFilters) {
+            $filteredIds[] = $candidateId;
+            error_log("ID $candidateId PASSOU em todos os filtros");
+
+            // Se já temos IDs suficientes, podemos parar
+            if (count($filteredIds) >= $limit) {
+                error_log("Atingido limite de $limit IDs. Interrompendo verificação.");
+                break;
+            }
+        } else {
+            error_log("ID $candidateId FALHOU nos filtros: " . implode("; ", $filterLogs));
+        }
+    }
+
+    $stmtUserProfile->close();
+    $stmtContentPrices->close();
+
+    error_log("======= FASE 3: OBTENDO USERNAMES PARA OS IDs FILTRADOS =======");
+    error_log("Total de IDs que passaram nos filtros: " . count($filteredIds));
+
+    if (empty($filteredIds)) {
+        error_log("Nenhum ID passou nos filtros. Retornando resultado vazio.");
+        return ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "nextCursor" => null, "hasMoreItems" => false];
+    }
+
+    // Obter usernames para os IDs filtrados
+    $placeholders = implode(',', array_fill(0, count($filteredIds), '?'));
+    $usernamesQuery = "SELECT graphInfluencerUserName, graphInfluencerId FROM Influencers WHERE graphInfluencerId IN ($placeholders) ORDER BY graphInfluencerId ASC";
+
+    $stmtUsernames = $connToAccType->prepare($usernamesQuery);
+    $types = str_repeat('s', count($filteredIds));
+    $stmtUsernames->bind_param($types, ...$filteredIds);
+
+    $resultData = [
+        "graphInfluencerUserName" => [],
+        "graphInfluencerId" => [],
+        "nextCursor" => null,
+        "hasMoreItems" => false
+    ];
+
+    if ($stmtUsernames->execute()) {
+        $usernamesResult = $stmtUsernames->get_result();
+
+        while ($row = $usernamesResult->fetch_assoc()) {
+            $resultData["graphInfluencerUserName"][] = $row['graphInfluencerUserName'];
+            $resultData["graphInfluencerId"][] = $row['graphInfluencerId'];
+        }
+
+        error_log("Obtidos " . count($resultData["graphInfluencerUserName"]) . " usernames");
+    } else {
+        error_log("ERRO ao obter usernames: " . $stmtUsernames->error);
+    }
+
+    $stmtUsernames->close();
+
+    // Verificar se há mais resultados
+    $lastId = end($resultData["graphInfluencerId"]);
+
+    if ($lastId && count($filteredIds) >= $limit) {
+        $resultData["hasMoreItems"] = true;
+        $resultData["nextCursor"] = $lastId;
+        error_log("Há mais resultados disponíveis. Definindo cursor: $lastId");
+    }
+
+    $connToUsuarios->close();
+    $connToAccType->close();
+
+    error_log("=========== FIM DA EXECUÇÃO (NOVA ABORDAGEM) ===========");
+    error_log("Resultado final: " . json_encode([
+        "total_usernames" => count($resultData["graphInfluencerUserName"]),
+        "nextCursor" => $resultData["nextCursor"],
+        "hasMoreItems" => $resultData["hasMoreItems"]
+    ]));
+
+    return $resultData;
+}
 
 
 function parseJsonToDataAllInfluencers($data, $info)
@@ -218,311 +574,4 @@ function parseJsonToDataAllInfluencers($data, $info)
         'userLocalBiography' => $info['biography'] ?? null,
         'influencerRating' => $info['averageRating'] ?? 0,
     ];
-}
-
-function getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor = null, $limit = 20)
-{
-    require_once "../../conn/Wamp64Connection.php";
-    $connToUsuarios = getWamp64Connection("Users");
-    $connToAccType = getWamp64Connection("userAccType");
-
-
-    //DataBase: Users: table: userprofile
-
-    //Column: userBirthdate type: DATE 2007-02-27
-    //Return all influencers with this ge ranges
-    //$selectedAges = $data['selectedAges'] ?? []; 
-
-    //Column: userLocation
-    // $selectedCities = $data['selectedCities'] ?? []; 
-    /**
-     * json structure in DB:
-     * {
-     *"userCity": null,
-     *"isSetuped": false, //to check if the selectedCities are setuped
-     *"userState": null,
-     *"userCountry": null
-     *}
-     */
-
-    // $selectedStates = $data['selectedStates'] ?? [];
-    /**
-     * json structure in DB:
-     * {
-     *"userCity": null,
-     *"isSetuped": false, //to check if the selectedStates are setuped
-     *"userState": null,
-     *"userCountry": null
-     *}
-     */
-
-    //Column: userTags 
-    // $selectedNiches = $data['selectedNiches'] ?? []; /*tags is the same proposal to Niches */
-    /**
-     * json structure in DB:
-     *{
-     *"firstTag": "Pets",
-     *"thirdTag": "Bulldog",
-     *"isSetuped": true, //to check if the selectedNiches are setuped
-     *"secondTag": "Rottweiler"
-     */
-
-
-    //DataBase: userAccType: Table: influencers
-
-    //Column: ContentTypes
-    // $selectedContentTypes = $data['selectedContentTypes'] ?? [];
-    /**
-     * json structure in DB:
-     *{
-     *"reels": true,
-     *"stories": true,
-     *"isSetuped": true, //to check if the ContentTypes are setuped
-     *"videos": false
-     *"posts": false
-     */
-
-    //Column: ContentPrices
-    // $selectedPrices = $data['selectedPrices'] ?? ['max' => 0.0, 'min' => 0.0];
-    //if user as selected ContentTypes like reels and stories, we gona return influencers who match the min and max range selectedPrices
-    /**
-     * json structure in DB:
-     *{
-     *"reels": {
-        *min: 10,
-        *max: 100,
-     *},
-     *"stories":  {
-        *min: 10,
-        *max: 100,
-     *},
-     *"isSetuped": true, //to check if the selectedPrices are setuped
-     *"videos":  {
-        *min: 10,
-        *max: 100,
-     *},
-     *"posts":  {
-        *min: 10,
-        *max: 100,
-     *},
-     */
-    
-    // $cursor = isset($data['cursor']) && $data['cursor'] !== 'null' ? $data['cursor'] : null;
-
-
-    $isSearchingFromSearchView = $search["isSearchingFromSearchiew"];
-    $searchQuery = trim(strtolower($search["searchQuery"] ?? ""));
-
-    $filteredIds = [];
-
-    if ($isSearchingFromSearchView) {
-        // Construindo a consulta para `Usuarios`
-        $queryUsuarios = "
-            SELECT graphInfluencerId
-            FROM UserProfile
-            WHERE (
-                LOWER(userMutableName) LIKE CONCAT('%', LOWER(?), '%')
-                OR LOWER(userBiography) LIKE CONCAT('%', LOWER(?), '%')
-                OR (
-                    JSON_EXTRACT(userTags, '$.isSetuped') = true
-                    AND (
-                        LOWER(JSON_EXTRACT(userTags, '$.firstTag')) LIKE CONCAT('%', LOWER(?), '%')
-                        OR LOWER(JSON_EXTRACT(userTags, '$.secondTag')) LIKE CONCAT('%', LOWER(?), '%')
-                        OR LOWER(JSON_EXTRACT(userTags, '$.thirdTag')) LIKE CONCAT('%', LOWER(?), '%')
-                    )
-                )
-            )
-        ";
-
-
-        if ($cursor) {
-            $queryUsuarios .= " AND graphInfluencerId > ? ";
-        }
-
-        $queryUsuarios .= "ORDER BY graphInfluencerId ASC LIMIT ?";
-
-        $stmtUsuarios = $connToUsuarios->prepare($queryUsuarios);
-
-        if ($cursor) {
-            $stmtUsuarios->bind_param("sssssis", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $cursor, $limit);
-        } else {
-            $stmtUsuarios->bind_param("sssssi", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $limit);
-        }
-
-        if ($stmtUsuarios->execute()) {
-            $resultUsuarios = $stmtUsuarios->get_result();
-            while ($row = $resultUsuarios->fetch_assoc()) {
-                error_log("Fetched graphInfluencerId: " . $row['graphInfluencerId']);
-                $filteredIds[] = $row['graphInfluencerId'];
-            }
-        } else {
-            error_log("Error executing query for UserProfile: " . $stmtUsuarios->error);
-        }
-        $stmtUsuarios->close();
-    }
-
-    if (empty($filteredIds)) {
-        return ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "hasMoreItems" => false];
-    }
-
-    // Construir a lista de placeholders dinamicamente
-    $placeholders = implode(",", array_fill(0, count($filteredIds), "?"));
-
-    // Obter os nomes de usuários do banco `userAccType`
-    $queryUsernames = "
-        SELECT graphInfluencerUserName, graphInfluencerId
-        FROM Influencers
-        WHERE graphInfluencerId IN ($placeholders)
-        ORDER BY graphInfluencerId ASC LIMIT ?
-    ";
-
-    $stmtUsernames = $connToAccType->prepare($queryUsernames);
-
-    // Criar dinamicamente os tipos e os argumentos para o bind_param
-    $types = str_repeat("s", count($filteredIds)) . "i";
-    $params = array_merge($filteredIds, [$limit]);
-
-    // Usar call_user_func_array para vincular os parâmetros dinamicamente
-    $stmtUsernames->bind_param($types, ...$params);
-
-    $resultData = ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "hasMoreItems" => false];
-
-    if ($stmtUsernames->execute()) {
-        $resultUsernames = $stmtUsernames->get_result();
-        while ($row = $resultUsernames->fetch_assoc()) {
-            $resultData["graphInfluencerUserName"][] = $row['graphInfluencerUserName'];
-            $resultData["graphInfluencerId"][] = $row['graphInfluencerId'];
-        }
-    } else {
-        error_log("Error executing query for Influencers: " . $stmtUsernames->error);
-    }
-    $stmtUsernames->close();
-
-    // Verificar se há mais elementos disponíveis
-    $lastId = end($resultData["graphInfluencerId"]);
-
-    if ($lastId) {
-        $queryCheck = "
-            SELECT 1
-            FROM UserProfile
-            WHERE (
-                LOWER(userMutableName) LIKE CONCAT('%', LOWER(?), '%') 
-                OR LOWER(userBiography) LIKE CONCAT('%', LOWER(?), '%')
-            )
-            AND graphInfluencerId > ?
-            LIMIT 1
-        ";
-        $stmtCheck = $connToUsuarios->prepare($queryCheck);
-        $stmtCheck->bind_param("sss", $searchQuery, $searchQuery, $lastId);
-
-        if ($stmtCheck->execute()) {
-            $stmtCheck->store_result();
-            if ($stmtCheck->num_rows > 0) {
-                $resultData["hasMoreItems"] = true;
-                $resultData["nextCursor"] = $lastId;
-            } else {
-                $resultData["hasMoreItems"] = false;
-                $resultData["nextCursor"] = null;
-            }
-        } else {
-            error_log("Error executing check query: " . $stmtCheck->error);
-            $resultData["nextCursor"] = null;
-        }
-        $stmtCheck->close();
-    } else {
-        $resultData["nextCursor"] = null;
-    }
-
-    $connToUsuarios->close();
-    $connToAccType->close();
-
-    return $resultData;
-}
-
-function getAllInfluencersInstaGramuserNamesAndIds($conn, $cursor = null, $limit = 10)
-{
-    $query = "SELECT graphInfluencerUserName, graphInfluencerId 
-              FROM Influencers ";
-    if ($cursor) {
-        $query .= "WHERE graphInfluencerId > ? ";
-    }
-    $query .= "ORDER BY graphInfluencerId ASC LIMIT ?";
-
-    $stmt = $conn->prepare($query);
-
-    if ($cursor) {
-        $stmt->bind_param("si", $cursor, $limit);
-    } else {
-        $stmt->bind_param("i", $limit);
-    }
-
-    $resultData = ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "hasMoreItems" => false];
-
-    if ($stmt) {
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        while ($row = $result->fetch_assoc()) {
-            $resultData["graphInfluencerUserName"][] = $row['graphInfluencerUserName'];
-            $resultData["graphInfluencerId"][] = $row['graphInfluencerId'];
-        }
-
-        // Verifica se há mais itens
-        $queryCheck = "SELECT 1 FROM Influencers WHERE graphInfluencerId > ? ORDER BY graphInfluencerId ASC LIMIT 1";
-        $stmtCheck = $conn->prepare($queryCheck);
-        $lastId = end($resultData["graphInfluencerId"]);
-
-        if ($lastId) {
-            $stmtCheck->bind_param("s", $lastId);
-            $stmtCheck->execute();
-            $stmtCheck->store_result();
-            if ($stmtCheck->num_rows > 0) {
-                $resultData["hasMoreItems"] = true;
-            }
-            $stmtCheck->close();
-        }
-
-        $stmt->close();
-    }
-
-    $conn->close();
-
-    return $resultData;
-}
-
-function getInfluencersInfoBatch($arrayGraphInfluencerIds)
-{
-    if (empty($arrayGraphInfluencerIds)) {
-        return [];
-    }
-
-    require_once "../../conn/Wamp64Connection.php";
-
-    $connUserProfile = getWamp64Connection("users");
-    $connReviews = getWamp64Connection("userAccType");
-
-    $idList = implode(',', array_map(fn($id) => "'$id'", $arrayGraphInfluencerIds));
-    $queryProfile = "SELECT graphInfluencerId, userLocation, userTags, userBiography 
-                     FROM userProfile WHERE graphInfluencerId IN ($idList)";
-    $queryRating = "SELECT influencerId, AVG(rating) AS averageRating 
-                    FROM influencerreview WHERE influencerId IN ($idList) 
-                    GROUP BY influencerId";
-
-    $info = [];
-
-    $resultProfile = $connUserProfile->query($queryProfile);
-    while ($row = $resultProfile->fetch_assoc()) {
-        $info[$row['graphInfluencerId']] = [
-            'location' => $row['userLocation'],
-            'tags' => $row['userTags'] ?? '',
-            'biography' => $row['userBiography'] ?? null,
-        ];
-    }
-
-    $resultRating = $connReviews->query($queryRating);
-    while ($row = $resultRating->fetch_assoc()) {
-        $info[$row['influencerId']]['averageRating'] = round($row['averageRating'], 1);
-    }
-
-    return $info;
 }
