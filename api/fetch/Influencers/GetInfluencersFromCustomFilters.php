@@ -28,7 +28,7 @@ function logRequest($logFile)
     file_put_contents($logFile, $logEntry . PHP_EOL, FILE_APPEND);
 }
 
-logRequest($logFile);
+//logRequest($logFile);
 
 // Verifica se o método da requisição é POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -97,38 +97,80 @@ if (!$conn) {
 }
 
 try {
+    // Inicializa a resposta final focada nos influenciadores
     $finalResponse = [
-        'data' => [],
+        'data' => [], // Container principal que armazenará influencers por ID
+        'total_influencers' => 0,
         'nextCursor' => null,
+        'hasMoreItems' => false
     ];
 
     $cursor = isset($data['cursor']) ? $data['cursor'] : null;
     $response = getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor);
 
-    if (!empty($response)) {
-        $finalResponse['data'] = [
-            'graphInfluencerUserName' => $response['graphInfluencerUserName'],
-            'graphInfluencerId' => $response['graphInfluencerId']
-        ];
-        $finalResponse['nextCursor'] = $response['nextCursor'];
+    // Anexa informações de paginação à resposta
+    $finalResponse['nextCursor'] = $response['nextCursor'];
+    $finalResponse['hasMoreItems'] = $response['hasMoreItems'] ?? false;
+
+    // Armazena os arrays de IDs e usernames para processamento
+    $graphInfluencerUserNameArrays = $response['graphInfluencerUserName'] ?? [];
+    $graphInfluencerIdsArrays = $response['graphInfluencerId'] ?? [];
+
+    // Se existem influenciadores para processar
+    if (!empty($graphInfluencerUserNameArrays)) {
+        // Extrair filtro de seguidores do payload
+        $selectedFollowers = $data['selectedFollowers'] ?? ['min' => 0, 'max' => 0];
+        
+        // Log para debug do filtro de seguidores
+        error_log("Aplicando filtro de seguidores (vindo do payload do usuário): min=" . $selectedFollowers['min'] . ", max=" . $selectedFollowers['max']);
+        
+        // Busca os dados da API, passando o filtro de seguidores
+        $queredInfluencers = fetchInfluencersData($graphInfluencerUserNameArrays, $graphInfluencerIdsArrays, $selectedFollowers);
+
+        // Adiciona as avaliações aos dados dos influenciadores
+        $queredInfluencers = addInfluencerRatings($queredInfluencers);
+
+        // Obter dados de localização, tags e preços para cada influenciador
+        // Passa os tipos de conteúdo selecionados para filtrar os preços
+        $selectedContentTypes = $data['selectedContentTypes'] ?? [];
+        $influencerInfos = getInfluencersInfoFromDB($queredInfluencers, $selectedContentTypes);
+
+        // Formatar os dados para o formato esperado pelo frontend
+        $dataById = []; // Array associativo para armazenar por ID
+        
+        foreach ($queredInfluencers['data'] as $index => $influencer) {
+            $apiData = $influencer['apiData'] ?? [];
+            $influencerId = $influencer['graphInfluencerId'];
+            $info = $influencerInfos[$influencerId] ?? [
+                'location' => '{}',
+                'tags' => '{}',
+                'userBiography' => '',
+                'averageRating' => $influencer['averageRating'] ?? 0,
+                'prices' => [],
+                'averageMinPrice' => 0
+            ];
+
+            $parsedData = parseJsonToDataAllInfluencers($apiData, $info);
+            
+            // Adiciona ao array associativo usando o ID como chave
+            $dataById[$influencerId] = $parsedData;
+        }
+
+        // Adiciona os dados formatados como elementos da resposta
+        $finalResponse['data'] = $dataById;
+        $finalResponse['total_influencers'] = count($dataById);
     }
 
-    $graphInfluencerUserNameArrays = $finalResponse["data"]["graphInfluencerUserName"];
-    $graphInfluencerIdsArrays = $finalResponse["data"]["graphInfluencerId"];
-
-    $queredInfluencers = fetchInfluencersData($graphInfluencerUserNameArrays, $graphInfluencerIdsArrays);
-
+    // Envia a resposta para o cliente
     echo json_encode($finalResponse);
 
-    error_log("queredInfluencers data: " . json_encode(array_map(function ($item) {
-        return [
-            'username' => $item['graphInfluencerUserName'],
-            'id' => $item['graphInfluencerId'],
-            'name' => $item['apiData']['name'] ?? 'N/A',
-            'followers' => $item['apiData']['followers_count'] ?? 0
-        ];
-    }, $queredInfluencers['data']), JSON_PRETTY_PRINT));
-
+    // Log da resposta final para debug
+    error_log("Resposta final formatada: " . json_encode([
+        'total_influencers' => $finalResponse['total_influencers'], 
+        'data' => $finalResponse['data'],
+        'nextCursor' => $finalResponse['nextCursor'],
+        'hasMoreItems' => $finalResponse['hasMoreItems']
+    ], JSON_PRETTY_PRINT));
 
     if ($conn) {
         $conn->close();
@@ -139,10 +181,221 @@ try {
     echo json_encode(['error' => 'Internal server error']);
 }
 
+/**
+ * Obtém informações adicionais dos influenciadores do banco de dados
+ * 
+ * @param array $influencersData Dados dos influenciadores obtidos via API
+ * @param array $selectedContentTypes Tipos de conteúdo selecionados pelo usuário
+ * @return array Array associativo com informações por ID de influenciador
+ */
+function getInfluencersInfoFromDB($influencersData, $selectedContentTypes = [])
+{
+    if (empty($influencersData['data'])) {
+        return [];
+    }
+
+    // Obtém conexão com o banco de dados
+    $connToUsuarios = getWamp64Connection("Users");
+    $connToAccType = getWamp64Connection("UserAccType");
+
+    if (!$connToUsuarios || !$connToAccType) {
+        error_log("Erro: Falha na conexão com o banco de dados ao buscar informações dos influenciadores");
+        return [];
+    }
+
+    // Extrai os IDs dos influenciadores
+    $influencerIds = array_map(function ($item) {
+        return $item['graphInfluencerId'];
+    }, $influencersData['data']);
+
+    // Prepara a lista de IDs para a query
+    $idList = "'" . implode("','", array_map([$connToUsuarios, 'real_escape_string'], $influencerIds)) . "'";
+
+    // Query para obter dados de perfil (adicionando userBirthdate)
+    $profileQuery = "SELECT 
+        graphInfluencerId, 
+        userTags, 
+        userLocation, 
+        userBiography,
+        userBirthdate
+    FROM UserProfile 
+    WHERE graphInfluencerId IN ($idList)";
+
+    // Query para obter preços
+    $pricesQuery = "SELECT 
+        graphInfluencerId, 
+        ContentPrices 
+    FROM Influencers 
+    WHERE graphInfluencerId IN ($idList)";
+
+    // Executa as queries
+    $profileResult = $connToUsuarios->query($profileQuery);
+    $pricesResult = $connToAccType->query($pricesQuery);
+
+    if (!$profileResult) {
+        error_log("Erro ao buscar perfis: " . $connToUsuarios->error);
+    }
+
+    if (!$pricesResult) {
+        error_log("Erro ao buscar preços: " . $connToAccType->error);
+    }
+
+    // Organiza os dados de perfil por ID
+    $infoMap = [];
+    if ($profileResult) {
+        while ($row = $profileResult->fetch_assoc()) {
+            $infoMap[$row['graphInfluencerId']] = [
+                'tags' => $row['userTags'],
+                'location' => $row['userLocation'],
+                'userBiography' => $row['userBiography'],
+                'userBirthdate' => $row['userBirthdate'], // Adicionando a data de nascimento
+                'prices' => []  // Será preenchido com os preços
+            ];
+        }
+    }
+
+    // Adiciona os preços às informações
+    if ($pricesResult) {
+        while ($row = $pricesResult->fetch_assoc()) {
+            $id = $row['graphInfluencerId'];
+            if (isset($infoMap[$id])) {
+                $contentPrices = json_decode($row['ContentPrices'], true);
+
+                // Processa apenas os tipos de conteúdo selecionados
+                $filteredPrices = [];
+                if (!empty($selectedContentTypes) && isset($contentPrices['isSetuped']) && $contentPrices['isSetuped']) {
+                    foreach ($selectedContentTypes as $contentType) {
+                        $contentKey = '';
+
+                        switch (strtolower($contentType)) {
+                            case 'stories':
+                                $contentKey = 'stories';
+                                break;
+                            case 'reel':
+                            case 'reels':
+                                $contentKey = 'reels';
+                                break;
+                            case 'post':
+                            case 'posts':
+                                $contentKey = 'posts';
+                                break;
+                            case 'video':
+                            case 'videos':
+                                $contentKey = 'videos';
+                                break;
+                        }
+
+                        if (!empty($contentKey) && isset($contentPrices[$contentKey])) {
+                            $filteredPrices[$contentKey] = $contentPrices[$contentKey];
+                        }
+                    }
+                } else if (isset($contentPrices['isSetuped']) && $contentPrices['isSetuped']) {
+                    // Se não há tipos de conteúdo selecionados, inclui todos
+                    $priceKeys = ['posts', 'reels', 'videos', 'stories'];
+                    foreach ($priceKeys as $key) {
+                        if (isset($contentPrices[$key])) {
+                            $filteredPrices[$key] = $contentPrices[$key];
+                        }
+                    }
+                }
+
+                $infoMap[$id]['prices'] = $filteredPrices;
+
+                // Calcula a média de preço mínimo para os tipos de conteúdo selecionados
+                $minPrices = array_column($filteredPrices, 'min');
+                $avgMinPrice = !empty($minPrices) ? array_sum($minPrices) / count($minPrices) : 0;
+                $infoMap[$id]['averageMinPrice'] = round($avgMinPrice, 2);
+            }
+        }
+    }
+
+    // Adiciona avaliações médias às informações
+    $ratingsMap = getInfluencerRatings($influencerIds);
+
+    // Combina os dados de perfil e avaliações
+    foreach ($infoMap as $id => &$info) {
+        $info['averageRating'] = $ratingsMap[$id] ?? 0;
+    }
+
+    $connToUsuarios->close();
+    $connToAccType->close();
+    return $infoMap;
+}
+
+/**
+ * Adiciona as avaliações médias aos dados dos influenciadores
+ * 
+ * @param array $influencersData Dados dos influenciadores obtidos via API
+ * @return array Dados completos incluindo avaliações médias
+ */
+function getInfluencerRatings($influencerIds)
+{
+    if (empty($influencerIds)) {
+        return [];
+    }
+
+    // Obtém conexão com o banco de dados
+    $conn = getWamp64Connection("userAccType");
+
+    if (!$conn) {
+        error_log("Erro: Falha na conexão com o banco de dados ao buscar avaliações");
+        return [];
+    }
+
+    // Prepara a lista de IDs para a query
+    $idList = "'" . implode("','", array_map([$conn, 'real_escape_string'], $influencerIds)) . "'";
+
+    // Query para obter as avaliações médias
+    $queryRating = "SELECT influencerId, AVG(rating) AS averageRating
+                    FROM influencerreview WHERE influencerId IN ($idList)
+                    GROUP BY influencerId";
+
+    // Executa a query
+    $result = $conn->query($queryRating);
+
+    if (!$result) {
+        error_log("Erro ao buscar avaliações: " . $conn->error);
+        $conn->close();
+        return [];
+    }
+
+    // Cria um mapa de ID -> avaliação média
+    $ratingsMap = [];
+    while ($row = $result->fetch_assoc()) {
+        $ratingsMap[$row['influencerId']] = (float)$row['averageRating'];
+    }
+
+    $conn->close();
+    return $ratingsMap;
+}
+
+function addInfluencerRatings($influencersData)
+{
+    if (empty($influencersData['data'])) {
+        return $influencersData;
+    }
+
+    // Extrai os IDs dos influenciadores
+    $influencerIds = array_map(function ($item) {
+        return $item['graphInfluencerId'];
+    }, $influencersData['data']);
+
+    // Obtém as avaliações
+    $ratingsMap = getInfluencerRatings($influencerIds);
+
+    // Adiciona as avaliações médias aos dados dos influenciadores
+    foreach ($influencersData['data'] as $key => $influencer) {
+        $id = $influencer['graphInfluencerId'];
+        $influencersData['data'][$key]['averageRating'] = $ratingsMap[$id] ?? 0;
+    }
+
+    return $influencersData;
+}
+
 function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor = null, $limit = 20)
 {
     error_log("=========== INÍCIO DA EXECUÇÃO (NOVA ABORDAGEM) ===========");
-    error_log("Filtros recebidos: " . json_encode($filterItems, JSON_PRETTY_PRINT));
+   // error_log("Filtros recebidos: " . json_encode($filterItems, JSON_PRETTY_PRINT));
 
     require_once "../../conn/Wamp64Connection.php";
     $connToUsuarios = getWamp64Connection("Users");
@@ -175,7 +428,7 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
 
     // Vamos pegar um número maior de IDs para ter mais chances de encontrar matches após a filtragem
     $batchSize = $limit * 10;
-    $batchQuery = "SELECT graphInfluencerId FROM UserProfile";
+    $batchQuery = "SELECT graphInfluencerId, userBiography FROM UserProfile";
 
     // Adicionar condição para o cursor
     if ($cursor) {
@@ -503,7 +756,13 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
 
     if (empty($filteredIds)) {
         error_log("Nenhum ID passou nos filtros. Retornando resultado vazio.");
-        return ["graphInfluencerUserName" => [], "graphInfluencerId" => [], "nextCursor" => null, "hasMoreItems" => false];
+        return [
+            "graphInfluencerUserName" => [],
+            "graphInfluencerId" => [],
+            "nextCursor" => null,
+            "hasMoreItems" => false,
+            "total" => 0
+        ];
     }
 
     // Obter usernames para os IDs filtrados
@@ -518,7 +777,8 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
         "graphInfluencerUserName" => [],
         "graphInfluencerId" => [],
         "nextCursor" => null,
-        "hasMoreItems" => false
+        "hasMoreItems" => false,
+        "total" => 0
     ];
 
     if ($stmtUsernames->execute()) {
@@ -552,26 +812,31 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
     error_log("Resultado final: " . json_encode([
         "total_usernames" => count($resultData["graphInfluencerUserName"]),
         "nextCursor" => $resultData["nextCursor"],
-        "hasMoreItems" => $resultData["hasMoreItems"]
+        "hasMoreItems" => $resultData["hasMoreItems"],
+        "total" => count($resultData["graphInfluencerUserName"])
     ]));
+
+    $resultData["total"] = count($resultData["graphInfluencerUserName"]);
 
     return $resultData;
 }
 
-
 function parseJsonToDataAllInfluencers($data, $info)
 {
     return [
-        'influencerName' => $data['name'] ?? '',
-        'influencerDescription' => $data['biography'] ?? '',
-        'influencerUserName' => $data['username'] ?? '',
-        'influencerProfileURL' => $data['profile_picture_url'] ?? null,
-        'influencerFollowers' => $data['followers_count'] ?? 0,
-        'influencerFollowing' => $data['follows_count'] ?? 0,
-        'influencerId' => $data['id'] ?? '',
+        'influencerName' => $data['name'] ?? '', //from instagram API
+        'influencerDescription' => $data['biography'] ?? '',  //from instagram API
+        'influencerUserName' => $data['username'] ?? '', //from instagram API
+        'influencerProfileURL' => $data['profile_picture_url'] ?? null, //from instagram API
+        'influencerFollowers' => $data['followers_count'] ?? 0, //from instagram API
+        'influencerFollowing' => $data['follows_count'] ?? 0, //from instagram API
+        'influencerId' => $data['id'] ?? '', //from instagram API
         'userLocation' => json_decode($info['location'], true),
         'userTags' => json_decode($info['tags'], true),
-        'userLocalBiography' => $info['biography'] ?? null,
+        'userLocalBiography' => $info['userBiography'] ?? null,
+        'userBirthdate' => $info['userBirthdate'] ?? null, // Adicionando a data de nascimento
         'influencerRating' => $info['averageRating'] ?? 0,
+        'contentPrices' => $info['prices'] ?? [], // Preços dos tipos de conteúdo selecionados
+        'averageMinPrice' => $info['averageMinPrice'] ?? 0 // Preço médio mínimo
     ];
 }

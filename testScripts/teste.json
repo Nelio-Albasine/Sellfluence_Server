@@ -1,7 +1,41 @@
 {
-    "userStars": 24743,
-    "userLTStars": 24743,
-    "userRevenue": 0.020000000000011783,
-    "userLTRevenue": 120.04,
-    "userLTCashouts": 1.12
+    "total_influencers": 1,
+    "data": {
+        "123456789_0": {
+            "influencerName": "N\u00e9lio Albasine",
+            "influencerDescription": "-> Backend & Mobile & web developer",
+            "influencerUserName": "albasinenelio",
+            "influencerProfileURL": "https:\/\/scontent-jnb2-1.xx.fbcdn.net\/v\/t51.2885-15\/422284545_7620243987985691_6671415838175122264_n.jpg?_nc_cat=101&ccb=1-7&_nc_sid=7d201b&_nc_eui2=AeFp59B5IHhk40k1pc7HtDbnlE-HJiVBXmeUT4cmJUFeZ66mbllA4NxJ5EKPvN8yu98aOP4LohWJJ3GUqrlVK8Fq&_nc_ohc=cEzXppIOPfQQ7kNvgE90A4k&_nc_oc=Adi4oY_UsL83cYLLFEl-KQWkrHOxV4GAJYpR0w0O8bIgX2_tn20RwI8V2vb0E3X9gA0&_nc_zt=23&_nc_ht=scontent-jnb2-1.xx&edm=AL-3X8kEAAAA&oh=00_AYHuQTjvVGEG_npnTMEp2oWXNRPeejeN9tF6lsBcnMEOkw&oe=67DDD7E9",
+            "influencerFollowers": 7,
+            "influencerFollowing": 9,
+            "influencerId": "17841460306948401",
+            "userLocation": {
+                "userCity": "Arapiraca",
+                "isSetuped": true,
+                "userState": "Alagoas",
+                "userCountry": "Mo\u00e7ambique"
+            },
+            "userTags": {
+                "firstTag": "Pets",
+                "thirdTag": "Arte",
+                "isSetuped": true,
+                "secondTag": "Beleza"
+            },
+            "userLocalBiography": null,
+            "influencerRating": 4.75,
+            "contentPrices": {
+                "reels": {
+                    "max": 100,
+                    "min": 10
+                },
+                "stories": {
+                    "max": 100,
+                    "min": 10
+                }
+            },
+            "averageMinPrice": 10
+        }
+    },
+    "nextCursor": null,
+    "hasMoreItems": false
 }

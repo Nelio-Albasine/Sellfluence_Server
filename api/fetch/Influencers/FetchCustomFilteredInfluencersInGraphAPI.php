@@ -6,11 +6,10 @@ include '../../settings/config.php';
  * 
  * @param array $graphInfluencerUserNames Array com os nomes de usuário dos influenciadores
  * @param array $graphInfluencerIds Array com os IDs dos influenciadores (no mesmo índice dos nomes)
- * @param string $accountId ID da conta do Instagram Business
- * @param string $token Token de acesso à API do Facebook
+ * @param array $followersFilter Filtro de seguidores (min, max)
  * @return array Array com os dados obtidos dos influenciadores
  */
-function fetchInfluencersData($graphInfluencerUserNames, $graphInfluencerIds) {
+function fetchInfluencersData($graphInfluencerUserNames, $graphInfluencerIds, $followersFilter = null) {
     // Verifica se os arrays têm o mesmo tamanho
     $token = FACEBOOK_ACCESS_TOKEN;
     $accountId = FACEBOOK_ACCOUNT_ID;
@@ -34,6 +33,24 @@ function fetchInfluencersData($graphInfluencerUserNames, $graphInfluencerIds) {
     if (empty($graphInfluencerUserNames)) {
         error_log("Aviso: Nenhum nome de usuário de influenciador fornecido");
         return $results;
+    }
+
+    // Validação e log do filtro de seguidores
+    $minFollowers = 0;
+    $maxFollowers = PHP_INT_MAX;
+    
+    if ($followersFilter && is_array($followersFilter)) {
+        if (isset($followersFilter['min']) && is_numeric($followersFilter['min']) && $followersFilter['min'] > 0) {
+            $minFollowers = (int)$followersFilter['min'];
+        }
+        
+        if (isset($followersFilter['max']) && is_numeric($followersFilter['max']) && $followersFilter['max'] > 0) {
+            $maxFollowers = (int)$followersFilter['max'];
+        }
+        
+        error_log("Aplicando filtro de seguidores: min={$minFollowers}, max=" . ($maxFollowers == PHP_INT_MAX ? "sem limite" : $maxFollowers));
+    } else {
+        error_log("Nenhum filtro de seguidores válido fornecido. Usando valores padrão: min=0, max=sem limite");
     }
 
     // Inicializa o manipulador multi CURL
@@ -151,11 +168,49 @@ function fetchInfluencersData($graphInfluencerUserNames, $graphInfluencerIds) {
             continue;
         }
         
+        // Verifica se o influenciador atende ao filtro de seguidores
+        $followers = $businessDiscovery['followers_count'] ?? 0;
+        $passesFollowersFilter = true;
+        
+        // Aplicação mais robusta do filtro de seguidores
+        if ($minFollowers > 0 || $maxFollowers < PHP_INT_MAX) {
+            if ($followers < $minFollowers) {
+                $passesFollowersFilter = false;
+                error_log("Influenciador {$username} NÃO atende ao filtro mínimo de seguidores: tem {$followers}, mínimo requerido: {$minFollowers}");
+            } else if ($maxFollowers < PHP_INT_MAX && $followers > $maxFollowers) {
+                $passesFollowersFilter = false;
+                error_log("Influenciador {$username} NÃO atende ao filtro máximo de seguidores: tem {$followers}, máximo permitido: {$maxFollowers}");
+            } else {
+                error_log("Influenciador {$username} PASSOU no filtro de seguidores: tem {$followers}, range permitido: {$minFollowers} - " . ($maxFollowers == PHP_INT_MAX ? "sem limite" : $maxFollowers));
+            }
+        } else {
+            error_log("Filtro de seguidores não aplicado para {$username}: tem {$followers} seguidores");
+        }
+        
+        // Pula para o próximo se não atende ao filtro de seguidores
+        if (!$passesFollowersFilter) {
+            $results['errors'][] = [
+                'index' => $index,
+                'id' => $influencerId,
+                'username' => $username,
+                'error' => 'Não atende ao filtro de seguidores',
+                'followers' => $followers,
+                'filter' => [
+                    'min' => $minFollowers,
+                    'max' => ($maxFollowers == PHP_INT_MAX) ? 'sem limite' : $maxFollowers
+                ]
+            ];
+            
+            $results['total_errors']++;
+            continue;
+        }
+        
         // Adiciona os dados aos resultados
         $results['success'][] = [
             'index' => $index,
             'id' => $influencerId,
-            'username' => $username
+            'username' => $username,
+            'followers' => $followers
         ];
         
         $results['data'][] = [
@@ -173,7 +228,7 @@ function fetchInfluencersData($graphInfluencerUserNames, $graphInfluencerIds) {
     
     // Registra estatísticas finais
     error_log("Processamento concluído: {$results['total_success']} sucesso, {$results['total_errors']} erros");
+    error_log("Filtro de seguidores aplicado: min={$minFollowers}, max=" . ($maxFollowers == PHP_INT_MAX ? "sem limite" : $maxFollowers));
     
     return $results;
 }
-
