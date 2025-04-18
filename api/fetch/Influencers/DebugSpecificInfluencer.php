@@ -9,7 +9,7 @@
 function debugSpecificUser($filterItems, $specificUserId) {
     error_log("=========== INICIANDO DEBUG PARA USUÁRIO ESPECÍFICO: $specificUserId ===========");
     require_once "../../conn/Wamp64Connection.php";
-    $connToUsuarios = getWamp64Connection("Users");
+    $connToUserProfile = getWamp64Connection("Users");
     
     // Extrair os filtros
     $selectedNiches = $filterItems['selectedNiches'] ?? [];
@@ -42,7 +42,7 @@ function debugSpecificUser($filterItems, $specificUserId) {
         WHERE graphInfluencerId = ?
     ";
     
-    $stmt = $connToUsuarios->prepare($queryUserData);
+    $stmt = $connToUserProfile->prepare($queryUserData);
     $stmt->bind_param("s", $specificUserId);
     
     if ($stmt->execute()) {
@@ -260,7 +260,7 @@ function debugSpecificUser($filterItems, $specificUserId) {
     }
     
     $stmt->close();
-    $connToUsuarios->close();
+    $connToUserProfile->close();
     
     error_log("=========== FIM DO DEBUG PARA USUÁRIO ESPECÍFICO ===========");
     

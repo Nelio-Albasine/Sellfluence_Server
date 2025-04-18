@@ -223,7 +223,7 @@ function parseJsonToDataAllInfluencers($data, $info)
 function getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor = null, $limit = 20)
 {
     require_once "../../conn/Wamp64Connection.php";
-    $connToUsuarios = getWamp64Connection("Users");
+    $connToUserProfile = getWamp64Connection("Users");
     $connToAccType = getWamp64Connection("userAccType");
 
 
@@ -316,8 +316,8 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor = null,
     $filteredIds = [];
 
     if ($isSearchingFromSearchView) {
-        // Construindo a consulta para `Usuarios`
-        $queryUsuarios = "
+        // Construindo a consulta para `UserProfile`
+        $queryUserProfile = "
             SELECT graphInfluencerId
             FROM UserProfile
             WHERE (
@@ -336,29 +336,29 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor = null,
 
 
         if ($cursor) {
-            $queryUsuarios .= " AND graphInfluencerId > ? ";
+            $queryUserProfile .= " AND graphInfluencerId > ? ";
         }
 
-        $queryUsuarios .= "ORDER BY graphInfluencerId ASC LIMIT ?";
+        $queryUserProfile .= "ORDER BY graphInfluencerId ASC LIMIT ?";
 
-        $stmtUsuarios = $connToUsuarios->prepare($queryUsuarios);
+        $stmtUserProfile = $connToUserProfile->prepare($queryUserProfile);
 
         if ($cursor) {
-            $stmtUsuarios->bind_param("sssssis", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $cursor, $limit);
+            $stmtUserProfile->bind_param("sssssis", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $cursor, $limit);
         } else {
-            $stmtUsuarios->bind_param("sssssi", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $limit);
+            $stmtUserProfile->bind_param("sssssi", $searchQuery, $searchQuery, $searchQuery, $searchQuery, $searchQuery, $limit);
         }
 
-        if ($stmtUsuarios->execute()) {
-            $resultUsuarios = $stmtUsuarios->get_result();
-            while ($row = $resultUsuarios->fetch_assoc()) {
+        if ($stmtUserProfile->execute()) {
+            $resultUserProfile = $stmtUserProfile->get_result();
+            while ($row = $resultUserProfile->fetch_assoc()) {
                 error_log("Fetched graphInfluencerId: " . $row['graphInfluencerId']);
                 $filteredIds[] = $row['graphInfluencerId'];
             }
         } else {
-            error_log("Error executing query for UserProfile: " . $stmtUsuarios->error);
+            error_log("Error executing query for UserProfile: " . $stmtUserProfile->error);
         }
-        $stmtUsuarios->close();
+        $stmtUserProfile->close();
     }
 
     if (empty($filteredIds)) {
@@ -412,7 +412,7 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor = null,
             AND graphInfluencerId > ?
             LIMIT 1
         ";
-        $stmtCheck = $connToUsuarios->prepare($queryCheck);
+        $stmtCheck = $connToUserProfile->prepare($queryCheck);
         $stmtCheck->bind_param("sss", $searchQuery, $searchQuery, $lastId);
 
         if ($stmtCheck->execute()) {
@@ -433,7 +433,7 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($data, $cursor = null,
         $resultData["nextCursor"] = null;
     }
 
-    $connToUsuarios->close();
+    $connToUserProfile->close();
     $connToAccType->close();
 
     return $resultData;

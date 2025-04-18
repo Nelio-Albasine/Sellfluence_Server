@@ -195,10 +195,10 @@ function getInfluencersInfoFromDB($influencersData, $selectedContentTypes = [])
     }
 
     // Obtém conexão com o banco de dados
-    $connToUsuarios = getWamp64Connection("Users");
+    $connToUserProfile = getWamp64Connection("Users");
     $connToAccType = getWamp64Connection("UserAccType");
 
-    if (!$connToUsuarios || !$connToAccType) {
+    if (!$connToUserProfile || !$connToAccType) {
         error_log("Erro: Falha na conexão com o banco de dados ao buscar informações dos influenciadores");
         return [];
     }
@@ -209,7 +209,7 @@ function getInfluencersInfoFromDB($influencersData, $selectedContentTypes = [])
     }, $influencersData['data']);
 
     // Prepara a lista de IDs para a query
-    $idList = "'" . implode("','", array_map([$connToUsuarios, 'real_escape_string'], $influencerIds)) . "'";
+    $idList = "'" . implode("','", array_map([$connToUserProfile, 'real_escape_string'], $influencerIds)) . "'";
 
     // Query para obter dados de perfil (adicionando userBirthdate)
     $profileQuery = "SELECT 
@@ -229,11 +229,11 @@ function getInfluencersInfoFromDB($influencersData, $selectedContentTypes = [])
     WHERE graphInfluencerId IN ($idList)";
 
     // Executa as queries
-    $profileResult = $connToUsuarios->query($profileQuery);
+    $profileResult = $connToUserProfile->query($profileQuery);
     $pricesResult = $connToAccType->query($pricesQuery);
 
     if (!$profileResult) {
-        error_log("Erro ao buscar perfis: " . $connToUsuarios->error);
+        error_log("Erro ao buscar perfis: " . $connToUserProfile->error);
     }
 
     if (!$pricesResult) {
@@ -317,7 +317,7 @@ function getInfluencersInfoFromDB($influencersData, $selectedContentTypes = [])
         $info['averageRating'] = $ratingsMap[$id] ?? 0;
     }
 
-    $connToUsuarios->close();
+    $connToUserProfile->close();
     $connToAccType->close();
     return $infoMap;
 }
@@ -398,7 +398,7 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
    // error_log("Filtros recebidos: " . json_encode($filterItems, JSON_PRETTY_PRINT));
 
     require_once "../../conn/Wamp64Connection.php";
-    $connToUsuarios = getWamp64Connection("Users");
+    $connToUserProfile = getWamp64Connection("Users");
     $connToAccType = getWamp64Connection("UserAccType");
 
     error_log("Conexões estabelecidas com bancos 'Users' e 'UserAccType'");
@@ -444,7 +444,7 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
     error_log("Query para obter batch inicial: " . $batchQuery);
     error_log("Parâmetros: " . json_encode($params));
 
-    $stmt = $connToUsuarios->prepare($batchQuery);
+    $stmt = $connToUserProfile->prepare($batchQuery);
 
     if ($stmt) {
         if (!empty($params)) {
@@ -466,7 +466,7 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
 
         $stmt->close();
     } else {
-        error_log("ERRO ao preparar statement de batch: " . $connToUsuarios->error);
+        error_log("ERRO ao preparar statement de batch: " . $connToUserProfile->error);
     }
 
     if (empty($candidateIds)) {
@@ -492,7 +492,7 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
     $contentPricesQuery = "SELECT ContentPrices FROM Influencers WHERE graphInfluencerId = ?";
 
     // Preparar statements
-    $stmtUserProfile = $connToUsuarios->prepare($userProfileQuery);
+    $stmtUserProfile = $connToUserProfile->prepare($userProfileQuery);
     $stmtContentPrices = $connToAccType->prepare($contentPricesQuery);
 
     if (!$stmtUserProfile || !$stmtContentPrices) {
@@ -805,7 +805,7 @@ function getAllInfluencersInstaGramuserNamesAndIdsByQuery($filterItems, $cursor 
         error_log("Há mais resultados disponíveis. Definindo cursor: $lastId");
     }
 
-    $connToUsuarios->close();
+    $connToUserProfile->close();
     $connToAccType->close();
 
     error_log("=========== FIM DA EXECUÇÃO (NOVA ABORDAGEM) ===========");
